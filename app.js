@@ -6,6 +6,7 @@
 import { openIfc, sampleBoxes, cutModel } from "./ifc.js";
 import { makeSectionPlane, chainSegments } from "./section.js";
 import { buildDxf } from "./dxf.js";
+import { fitAlignment } from "./align.js";
 
 const $ = (id) => document.getElementById(id);
 const EMBEDDED = window.parent !== window;
@@ -36,10 +37,6 @@ function progress(text) {
 }
 
 const nextFrame = () => new Promise((r) => setTimeout(r, 30)); // deixa a tela atualizar
-const median = (arr) => {
-  const s = [...arr].sort((a, b) => a - b);
-  return s.length ? s[Math.floor(s.length / 2)] : NaN;
-};
 const vec = (p) => (Array.isArray(p) ? p : [p.x, p.y, p.z]);
 
 // ---------------- conexão ----------------
@@ -161,22 +158,32 @@ function renderModels() {
 
 // ---------------- token e download ----------------
 
+// Um token de verdade é uma string longa; "pending", "denied" etc. são só status.
+const isToken = (v) => typeof v === "string" && v.length > 30 && !/\s/.test(v);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 function onToken(value) {
-  if (!value || value === "pending") return;
   if (value === "denied") {
     tokenWaiters.forEach((w) => w.reject(new Error("Permissão de token negada.")));
-  } else {
+    tokenWaiters = [];
+  } else if (isToken(value)) {
     accessToken = value;
     tokenWaiters.forEach((w) => w.resolve(value));
+    tokenWaiters = [];
   }
-  tokenWaiters = [];
 }
 
-async function getToken() {
-  if (accessToken) return accessToken;
-  const r = await API.extension.requestPermission("accesstoken");
-  if (r && r !== "pending" && r !== "denied") return (accessToken = r);
-  if (r === "denied") throw new Error("Permissão de token negada.");
+async function getToken(force = false) {
+  if (accessToken && !force) return accessToken;
+  accessToken = null;
+  for (let i = 0; i < 3; i++) {
+    const r = await API.extension.requestPermission("accesstoken");
+    if (isToken(r)) return (accessToken = r);
+    if (r === "denied") throw new Error("Permissão de token negada.");
+    if (r === "pending") break;
+    log("Status inesperado do token", r);
+    await sleep(500);
+  }
   progress("Autorize o acesso na janela do Trimble Connect…");
   return new Promise((resolve, reject) => {
     tokenWaiters.push({ resolve, reject });
@@ -196,9 +203,17 @@ function apiBase() {
   return REGION_HOSTS[loc] || REGION_HOSTS.northamerica;
 }
 
+// Chamada autenticada; se vier 401 (token vencido/inválido), pede um token novo e repete uma vez.
+async function authedFetch(url) {
+  let res = await fetch(url, { headers: { Authorization: `Bearer ${await getToken()}` } });
+  if (res.status === 401) {
+    log("401 — pedindo novo token");
+    res = await fetch(url, { headers: { Authorization: `Bearer ${await getToken(true)}` } });
+  }
+  return res;
+}
+
 async function downloadModel(model) {
-  const token = await getToken();
-  const headers = { Authorization: `Bearer ${token}` };
   const base = apiBase();
   const v = model.versionId ? `?versionId=${encodeURIComponent(model.versionId)}` : "";
   const candidates = [`${base}files/fs/${model.id}/downloadurl${v}`, `${base}files/${model.id}/downloadurl${v}`];
@@ -206,7 +221,7 @@ async function downloadModel(model) {
   let url = null;
   for (const c of candidates) {
     try {
-      const res = await fetch(c, { headers });
+      const res = await authedFetch(c);
       if (!res.ok) {
         log(`downloadurl ${res.status}`, c);
         continue;
@@ -246,20 +261,11 @@ async function calibrate(modelId, ifcModel) {
     const s = byRuntime.get(vb.id);
     const box = vb.boundingBox;
     if (!s || !box?.min || !box?.max) continue;
-    pairs.push({ ifc: s, vmin: vec(box.min), vmax: vec(box.max) });
+    pairs.push({ ifc: { min: s.min, max: s.max }, v: { min: vec(box.min), max: vec(box.max) } });
   }
   if (!pairs.length) throw new Error("caixas do visualizador indisponíveis");
 
-  const diag = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
-  let s = median(pairs.map((p) => diag(p.vmin, p.vmax) / (diag(p.ifc.min, p.ifc.max) || 1)));
-  const pow = Math.pow(10, Math.round(Math.log10(s)));
-  if (Math.abs(s / pow - 1) < 0.02) s = pow; // encaixa em 1, 1000, 0.001…
-
-  const center = (a, b, k) => (a[k] + b[k]) / 2;
-  const t = [0, 1, 2].map((k) => median(pairs.map((p) => center(p.vmin, p.vmax, k) - s * center(p.ifc.min, p.ifc.max, k))));
-  const residual = median(pairs.map((p) => Math.abs(p.vmin[0] - (s * p.ifc.min[0] + t[0])) / s)); // em metros
-
-  return { s, t, n: pairs.length, residual };
+  return fitAlignment(pairs); // escala (potência de 10), rotação em Z e deslocamento
 }
 
 /** Converte o plano da tesoura (mm, coordenadas do visualizador) para o espaço do IFC (m). */
@@ -267,8 +273,8 @@ function planeToIfc(plane, calib) {
   const pmm = [plane.positionX, plane.positionY, plane.positionZ];
   const normal = [plane.directionX, plane.directionY, plane.directionZ];
   if (!calib) return { point: pmm.map((x) => x / 1000), normal };
-  const pb = pmm.map((x) => x * (calib.s / 1000)); // mm -> unidade das caixas do visualizador
-  return { point: pb.map((x, k) => (x - calib.t[k]) / calib.s), normal };
+  const inViewerUnits = pmm.map((x) => (x * calib.s) / 1000); // mm -> unidade das caixas do visualizador
+  return { point: calib.toIfcPoint(inViewerUnits), normal: calib.toIfcDir(normal) };
 }
 
 async function selectedGuids(modelId) {
@@ -326,13 +332,24 @@ async function generate() {
           if (job.modelId) {
             try {
               calib = await calibrate(job.modelId, model);
-              log("Alinhamento", calib);
-              if (calib.residual > 0.05) log("Atenção: alinhamento impreciso (modelo girado/deslocado?)");
+              log("Alinhamento", {
+                escala: calib.s,
+                rotacaoGraus: +calib.thetaDeg.toFixed(3),
+                deslocamento: calib.t.map((v) => +v.toFixed(3)),
+                objetosUsados: `${calib.n}/${calib.total}`,
+                erroMedio_m: +calib.residual.toFixed(3),
+              });
+              if (calib.residual > 0.2) log("Atenção: alinhamento impreciso, o corte pode sair deslocado");
             } catch (err) {
               log("Sem alinhamento automático, usando coordenadas do IFC", String(err));
             }
           }
           planeIfc = planeToIfc(tcPlane, calib);
+          log("Plano no espaço do IFC (m)", {
+            ponto: planeIfc.point.map((v) => +v.toFixed(2)),
+            normal: planeIfc.normal.map((v) => +v.toFixed(3)),
+            caixaDoModelo: calib && { min: calib.ifcBounds.min.map((v) => +v.toFixed(1)), max: calib.ifcBounds.max.map((v) => +v.toFixed(1)) },
+          });
         } else {
           planeIfc = {
             point: ["px", "py", "pz"].map((id) => Number($(id).value) / 1000),
@@ -358,7 +375,13 @@ async function generate() {
       }
     }
 
-    if (!total) throw new Error("O plano não cortou nenhum elemento. Confira a posição da tesoura.");
+    if (!total) {
+      throw new Error(
+        opts.onlySelected
+          ? "A tesoura não cruza os objetos selecionados. Desmarque 'Só objetos selecionados' ou mova o plano."
+          : "O plano não cortou nenhum elemento. Confira a posição da tesoura (veja o Log)."
+      );
+    }
 
     const dxf = buildDxf(layers, { units: opts.units });
     const name = `corte_${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "")}.dxf`;

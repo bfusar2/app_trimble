@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="pt-BR">
+<head><meta charset="utf-8" /><title>Teste do alinhamento</title></head>
+<body>
+  <pre id="out">Rodando…</pre>
+  <script type="module">
+    import { fitAlignment } from "../align.js";
+
+    // Gerador simples e repetível
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+
+    // Caixas de 40 objetos espalhados por ~12 m, em coordenadas UTM como as do seu modelo.
+    const base = [734670.4, 7527112.1, 456.5];
+    function makeIfcBoxes() {
+      return Array.from({ length: 40 }, () => {
+        const c = [base[0] + (rnd() - 0.5) * 12, base[1] + (rnd() - 0.5) * 12, base[2] + rnd() * 8];
+        const h = [0.1 + rnd() * 2, 0.1 + rnd() * 2, 0.1 + rnd() * 3];
+        return { min: c.map((v, k) => v - h[k] / 2), max: c.map((v, k) => v + h[k] / 2) };
+      });
+    }
+
+    // Projeta uma caixa no "visualizador": escala unit, rotação theta (Z), deslocamento t, folga pad.
+    function toViewer(box, unit, thetaDeg, t, pad) {
+      const th = (thetaDeg * Math.PI) / 180, c = Math.cos(th), s = Math.sin(th);
+      const corners = [];
+      for (const x of [box.min[0], box.max[0]]) for (const y of [box.min[1], box.max[1]]) for (const z of [box.min[2], box.max[2]]) {
+        const X = x * unit, Y = y * unit, Z = z * unit;
+        corners.push([c * X - s * Y + t[0], s * X + c * Y + t[1], Z + t[2]]);
+      }
+      const min = [0, 1, 2].map((k) => Math.min(...corners.map((p) => p[k])) - pad * unit);
+      const max = [0, 1, 2].map((k) => Math.max(...corners.map((p) => p[k])) + pad * unit);
+      return { min, max };
+    }
+
+    const cases = [
+      { nome: "Identidade em metros (seu caso: escala deu 1,044)", unit: 1, theta: 0, t: [0, 0, 0], pad: 0.05 },
+      { nome: "Visualizador em milímetros", unit: 1000, theta: 0, t: [0, 0, 0], pad: 0.05 },
+      { nome: "Deslocado 500 m, em metros", unit: 1, theta: 0, t: [500, -300, 10], pad: 0.05 },
+      { nome: "Girado 30 graus + deslocado", unit: 1, theta: 30, t: [1000, 2000, 5], pad: 0.05 },
+      { nome: "Com 20% de objetos errados (outliers)", unit: 1, theta: 0, t: [0, 0, 0], pad: 0.05, outliers: 8 },
+    ];
+
+    const results = [];
+    for (const cs of cases) {
+      const ifc = makeIfcBoxes();
+      const pairs = ifc.map((b) => ({ ifc: b, v: toViewer(b, cs.unit, cs.theta, cs.t, cs.pad) }));
+      for (let i = 0; i < (cs.outliers || 0); i++) {
+        const v = pairs[i].v;
+        const off = 50 + rnd() * 50;
+        pairs[i].v = { min: v.min.map((x) => x + off), max: v.max.map((x) => x + off) };
+      }
+      const fit = fitAlignment(pairs);
+
+      // Verifica: um ponto qualquer do viewer volta ao IFC certo?
+      const pIfc = [base[0] + 3, base[1] - 2, base[2] + 1.5];
+      const th = (cs.theta * Math.PI) / 180, c = Math.cos(th), s = Math.sin(th);
+      const X = pIfc[0] * cs.unit, Y = pIfc[1] * cs.unit, Z = pIfc[2] * cs.unit;
+      const pViewer = [c * X - s * Y + cs.t[0], s * X + c * Y + cs.t[1], Z + cs.t[2]];
+      const back = fit.toIfcPoint(pViewer);
+      const errPoint = Math.hypot(back[0] - pIfc[0], back[1] - pIfc[1], back[2] - pIfc[2]);
+
+      // Direção: normal no viewer volta ao IFC?
+      const nIfc = [0.29, -0.96, 0];
+      const nViewer = [c * nIfc[0] - s * nIfc[1], s * nIfc[0] + c * nIfc[1], 0];
+      const nBack = fit.toIfcDir(nViewer);
+      const errDir = Math.hypot(nBack[0] - nIfc[0], nBack[1] - nIfc[1], nBack[2] - nIfc[2]);
+
+      results.push({
+        caso: cs.nome,
+        escala: fit.s, escalaEsperada: cs.unit,
+        rotacaoGraus: +fit.thetaDeg.toFixed(3), rotacaoEsperada: cs.theta,
+        usados: `${fit.n}/${fit.total}`,
+        erroPonto_m: +errPoint.toFixed(4),
+        erroDirecao: +errDir.toFixed(5),
+        ok: fit.s === cs.unit && errPoint < 0.05 && errDir < 0.001,
+      });
+    }
+
+    window.__result = results;
+    document.getElementById("out").textContent = JSON.stringify(results, null, 1);
+  </script>
+</body>
+</html>
