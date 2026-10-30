@@ -1,0 +1,8 @@
+{
+  "title": "Corte DXF",
+  "description": "Gera um DXF a partir do plano de corte (tesoura) do Visualizador 3D",
+  "icon": "https://bfusar2.github.io/app_trimble/icon.svg",
+  "url": "https://bfusar2.github.io/app_trimble/index.html",
+  "infoUrl": "https://github.com/bfusar2/app_trimble#readme",
+  "extensionType": ["3dviewer"]
+}

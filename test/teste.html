@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <title>Teste do corte</title>
+  <style>body{font:14px system-ui;padding:16px;background:#fff;color:#222}pre{background:#f4f4f4;padding:8px}</style>
+</head>
+<body>
+  <h1>Teste do corte IFC → DXF</h1>
+  <pre id="out">Rodando…</pre>
+  <script type="module">
+    import { openIfc, cutModel, sampleBoxes } from "../ifc.js";
+    import { makeSectionPlane, chainSegments } from "../section.js";
+    import { buildDxf } from "../dxf.js";
+
+    const out = document.getElementById("out");
+    const result = {};
+    try {
+      const buf = await (await fetch("teste.ifc")).arrayBuffer();
+      const model = await openIfc(buf);
+
+      result.boxes = sampleBoxes(model).map((b) => ({ guid: b.guid, min: b.min.map((v) => +v.toFixed(3)), max: b.max.map((v) => +v.toFixed(3)) }));
+
+      const cases = {
+        planta_z1500: makeSectionPlane([0, 0, 1.5], [0, 0, 1]),
+        corte_y2500: makeSectionPlane([0, 2.5, 0], [0, 1, 0]),
+      };
+      result.dxf = {};
+      for (const [name, plane] of Object.entries(cases)) {
+        const { segmentsByType, elementCount } = cutModel(model, plane, { scale: 1000 });
+        const layers = new Map();
+        const summary = {};
+        for (const [type, segs] of segmentsByType) {
+          const lines = chainSegments(segs, 0.5);
+          layers.set(type, lines);
+          summary[type] = lines.map((l) => ({ closed: l.closed, pts: l.points.map((p) => p.map((v) => Math.round(v))) }));
+        }
+        result[name] = { elementCount, summary };
+        result.dxf[name] = buildDxf(layers, { units: "mm" });
+      }
+      model.close();
+      out.textContent = JSON.stringify({ ...result, dxf: Object.fromEntries(Object.entries(result.dxf).map(([k, v]) => [k, v.length + " bytes"])) }, null, 1);
+    } catch (err) {
+      result.error = String(err?.stack || err);
+      out.textContent = result.error;
+    }
+    window.__result = result;
+  </script>
+</body>
+</html>

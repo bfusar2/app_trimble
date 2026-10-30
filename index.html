@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Corte DXF – Interalli</title>
+  <link rel="icon" href="icon.svg" />
+  <link rel="stylesheet" href="style.css" />
+  <!-- Workspace API oficial da Trimble (ponte entre o iframe e o Trimble Connect) -->
+  <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
+</head>
+<body>
+  <header>
+    <h1>Corte DXF</h1>
+    <span id="status" class="badge">Conectando…</span>
+  </header>
+
+  <main id="app">
+    <!-- 1. Plano de corte -->
+    <section>
+      <h2>1. Plano de corte (tesoura)</h2>
+      <div id="planes"><p class="hint">Carregando…</p></div>
+
+      <div id="manual-plane" hidden>
+        <p class="hint">Plano manual (coordenadas do IFC, em mm):</p>
+        <div class="grid3">
+          <label>Ponto X <input id="px" type="number" value="0" /></label>
+          <label>Ponto Y <input id="py" type="number" value="0" /></label>
+          <label>Ponto Z <input id="pz" type="number" value="1500" /></label>
+          <label>Normal X <input id="nx" type="number" value="0" step="0.1" /></label>
+          <label>Normal Y <input id="ny" type="number" value="0" step="0.1" /></label>
+          <label>Normal Z <input id="nz" type="number" value="1" step="0.1" /></label>
+        </div>
+      </div>
+      <button id="btn-refresh" class="secondary small">Atualizar planos</button>
+    </section>
+
+    <!-- 2. Modelos -->
+    <section>
+      <h2>2. Modelo(s) IFC</h2>
+      <div id="models"><p class="hint">Carregando…</p></div>
+      <label class="file">
+        Ou carregar IFC do computador
+        <input id="file" type="file" accept=".ifc" />
+      </label>
+    </section>
+
+    <!-- 3. Opções -->
+    <section>
+      <h2>3. Opções</h2>
+      <label class="check"><input id="opt-selected" type="checkbox" /> Só objetos selecionados</label>
+      <label class="check"><input id="opt-mirror" type="checkbox" /> Espelhar horizontalmente</label>
+      <label class="inline">Unidade do DXF
+        <select id="opt-units">
+          <option value="mm" selected>milímetros</option>
+          <option value="m">metros</option>
+        </select>
+      </label>
+    </section>
+
+    <button id="btn-generate" class="primary">Gerar DXF</button>
+    <p id="progress" class="hint"></p>
+    <p id="download"></p>
+  </main>
+
+  <details id="log-box">
+    <summary>Log</summary>
+    <pre id="log"></pre>
+  </details>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
