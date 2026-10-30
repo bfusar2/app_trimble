@@ -7,7 +7,7 @@
   <ul id="out"></ul>
   <script type="module">
     import { expandIfcGuid, compressIfcGuid, canonGuid } from "../guid.js";
-    import { makeSectionPlane, sliceMesh } from "../section.js";
+    import { makeSectionPlane, sliceMesh, chainSegments } from "../section.js";
 
     const results = [];
     const check = (nome, cond, detalhe = "") => results.push({ nome, ok: !!cond, detalhe });
@@ -100,6 +100,64 @@
     threw = false;
     try { makeSectionPlane([NaN, 0, 0], [0, 0, 1]); } catch { threw = true; }
     check("Coordenada inválida é rejeitada", threw);
+
+    // ---------- Polilinhas: nenhum trecho de linha pode sumir ----------
+    // Cobertura = comprimento da união dos trechos sobre cada reta.
+    function coverage(segs) {
+      const lines = new Map();
+      for (const [x1, y1, x2, y2] of segs) {
+        const dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy);
+        if (L < 1e-9) continue;
+        let ux = dx / L, uy = dy / L;
+        if (ux < -1e-9 || (Math.abs(ux) < 1e-9 && uy < 0)) { ux = -ux; uy = -uy; }
+        const key = `${ux.toFixed(5)},${uy.toFixed(5)},${(-uy * x1 + ux * y1).toFixed(4)}`;
+        const t = [x1 * ux + y1 * uy, x2 * ux + y2 * uy];
+        if (!lines.has(key)) lines.set(key, []);
+        lines.get(key).push([Math.min(...t), Math.max(...t)]);
+      }
+      let total = 0;
+      for (const iv of lines.values()) {
+        iv.sort((a, b) => a[0] - b[0]);
+        let cur = null;
+        for (const [a, b] of iv) {
+          if (cur && a <= cur[1] + 1e-9) cur[1] = Math.max(cur[1], b);
+          else { if (cur) total += cur[1] - cur[0]; cur = [a, b]; }
+        }
+        if (cur) total += cur[1] - cur[0];
+      }
+      return total;
+    }
+    const toSegs = (lines) => lines.flatMap((l) => {
+      const p = l.points, s = [];
+      for (let i = 0; i < p.length - 1; i++) s.push([...p[i], ...p[i + 1]]);
+      if (l.closed && p.length > 2) s.push([...p.at(-1), ...p[0]]);
+      return s;
+    });
+    const chainCoverage = (segs) => coverage(toSegs(chainSegments(segs.flat(), 0.0005)));
+
+    check("Linha que volta sobre si mesma (0..6 e 6..2) não perde trecho",
+      near(chainCoverage([[0, 0, 6, 0], [6, 0, 2, 0]]), 6), `${chainCoverage([[0, 0, 6, 0], [6, 0, 2, 0]])} de 6`);
+    check("Vertical com retorno parcial não perde trecho",
+      near(chainCoverage([[0, 0, 4, 0], [4, 0, 4, 3], [4, 3, 4, 1]]), 7));
+    check("Trechos em sequência continuam virando uma só linha",
+      chainSegments([0, 0, 3, 0, 3, 0, 6, 0], 0.0005).length === 1);
+    check("Pontos colineares em sequência continuam sendo simplificados",
+      chainSegments([0, 0, 3, 0, 3, 0, 6, 0], 0.0005)[0].points.length === 2);
+    {
+      let seed = 12345;
+      const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+      const grid = (n) => Math.round(rnd() * n);
+      let perdas = 0;
+      for (let k = 0; k < 400; k++) {
+        const segs = [];
+        for (let i = 0, n = 4 + Math.floor(rnd() * 14); i < n; i++) {
+          const a = grid(8), b = grid(8), c = grid(3);
+          if (a !== b) segs.push(rnd() < 0.5 ? [a, c, b, c] : [c, a, c, b]);
+        }
+        if (chainCoverage(segs) < coverage(segs) - 1e-6) perdas++;
+      }
+      check("400 conjuntos aleatórios de linhas sobrepostas: nenhum perde trecho", perdas === 0, `${perdas} com perda`);
+    }
 
     // ---------- mostra ----------
     const ul = document.getElementById("out");

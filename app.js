@@ -423,11 +423,13 @@ async function generate() {
 
         for (const [type, segs] of segmentsByType) {
           const lines = chainSegments(segs, scale === 1000 ? 0.5 : 0.0005);
+          log(`Camada ${type}: ${segs.length / 4} segmentos -> ${lines.length} linhas`);
           layers.set(type, (layers.get(type) || []).concat(lines));
         }
         for (const [type, segs] of viewSegmentsByType) {
           const layer = `${type}_VISTA`;
           const lines = chainSegments(segs, scale === 1000 ? 0.5 : 0.0005);
+          log(`Camada ${layer}: ${segs.length / 4} segmentos -> ${lines.length} linhas`);
           layers.set(layer, (layers.get(layer) || []).concat(lines));
         }
       } finally {

@@ -47,6 +47,10 @@
       const dxf = buildDxf(layers);
       check("DXF inclui camadas de corte e _VISTA", layers.has("IFCWALL") && layers.has("IFCSLAB_VISTA") && dxf.includes("IFCSLAB_VISTA\r\n") && dxf.endsWith("0\r\nEOF\r\n"));
       check("DXF não contém coordenadas inválidas", !/NaN|Infinity/.test(dxf));
+      const entities = dxf.indexOf("\r\nENTITIES\r\n");
+      check("Camadas _VISTA vêm antes do corte no arquivo (corte fica por cima)",
+        dxf.indexOf("\r\nIFCSLAB_VISTA\r\n", entities) > 0 &&
+        dxf.indexOf("\r\nIFCSLAB_VISTA\r\n", entities) < dxf.indexOf("\r\nIFCWALL\r\n", entities));
 
       for (const [title, data] of [["Profundidade 0 m — somente o plano", section], ["Profundidade 2 m — plano e laje em vista", deep]]) {
         const figure = document.createElement("figure");

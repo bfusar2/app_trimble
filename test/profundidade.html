@@ -63,6 +63,23 @@
     }
     const duplicated = mesh([[0,0,-1],[2,0,-1],[2,3,-1],[0,0,-1],[2,3,-1],[0,3,-1]],[0,1,2,3,4,5]);
     check("Vértices duplicados por face não revelam diagonal", run(duplicated).count === 4);
+    // IFC é float32: o mesmo canto, calculado por faces diferentes, pode diferir ~1e-6 m.
+    // Cada triângulo ganha vértices próprios com ruído; as diagonais não podem aparecer.
+    {
+      const base = box([0,0,-2],[2,3,-1]);
+      let seed = 4242;
+      const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647 - 0.5) * 2e-6;
+      const pts = [], idx = [];
+      for (const i of base.indices) {
+        pts.push(base.positions[3*i] + rnd(), base.positions[3*i+1] + rnd(), base.positions[3*i+2] + rnd());
+        idx.push(idx.length);
+      }
+      const noisy = run({ positions: new Float64Array(pts), indices: new Uint32Array(idx) });
+      let diagonal = false;
+      for (let i = 0; i < noisy.out.length; i += 4)
+        if (Math.abs(noisy.out[i] - noisy.out[i+2]) > 1e-4 && Math.abs(noisy.out[i+1] - noisy.out[i+3]) > 1e-4) diagonal = true;
+      check("Vértices com ruído de float32 não revelam diagonais da triangulação", noisy.count >= 4 && !diagonal);
+    }
     const reversed = mesh([[0,0,-1],[2,0,-1],[2,3,-1],[0,3,-1]],[0,1,2,0,3,2]);
     check("Triângulos coplanares com winding invertido não revelam diagonal", run(reversed).count === 4);
     const roof = mesh([[-1,0,-1.1],[0,0,-1],[0,2,-1],[-1,2,-1.1],[1,0,-1.1],[1,2,-1.1]], [0,1,2,0,2,3,1,4,5,1,5,2]);

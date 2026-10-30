@@ -3,6 +3,7 @@
 // por outras faces/objetos. Diagonais entre triângulos coplanares são omitidas.
 
 const EPS = 1e-7;
+const WELD = 1e-5; // m (0,01 mm): tolerância para considerar dois vértices o mesmo ponto
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const sub = (a, b) => a.map((x, k) => x - b[k]);
 const at = (a, b, t) => a.map((x, k) => x + (b[k] - x) * t);
@@ -26,19 +27,30 @@ export function projectMeshDepth(positions, indices, plane, { depth = 0, directi
   if (positions.length % 3 || indices.length % 3) throw new Error("Malha da vista inválida.");
 
   // Solda vértices geométricos, inclusive os duplicados por face no web-ifc.
-  const vertices = [], vertexIds = [], welded = new Map();
+  // O IFC vem em float32: o mesmo canto, calculado por faces diferentes, pode diferir
+  // na ordem de 1e-7 a 1e-6 m. Com tolerância menor que isso, os cantos não soldam,
+  // cada aresta vira "contorno" e as diagonais da triangulação aparecem no desenho.
+  const vertices = [], vertexIds = [], cells = new Map();
   let minD = Infinity, maxD = -Infinity;
+  const weld = (p) => {
+    const c = p.map((x) => Math.floor(x / WELD));
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+      const ids = cells.get(`${c[0] + dx},${c[1] + dy},${c[2] + dz}`);
+      if (ids) for (const id of ids) if (Math.hypot(...sub(vertices[id].p, p)) <= WELD) return id;
+    }
+    const id = vertices.length;
+    const d = direction * dot(sub(p, plane.point), plane.normal);
+    vertices.push({ p, d });
+    const key = c.join(",");
+    if (!cells.has(key)) cells.set(key, []);
+    cells.get(key).push(id);
+    minD = Math.min(minD, d); maxD = Math.max(maxD, d);
+    return id;
+  };
   for (let i = 0; i < positions.length; i += 3) {
     const p = [positions[i], positions[i + 1], positions[i + 2]];
     if (!p.every(Number.isFinite)) throw new Error("Malha da vista contém coordenadas inválidas.");
-    const key = pointKey(p);
-    if (!welded.has(key)) {
-      const d = direction * dot(sub(p, plane.point), plane.normal);
-      welded.set(key, vertices.length);
-      vertices.push({ p, d });
-      minD = Math.min(minD, d); maxD = Math.max(maxD, d);
-    }
-    vertexIds.push(welded.get(key));
+    vertexIds.push(weld(p));
   }
   if (minD > depth + EPS || maxD < -EPS) return 0;
 

@@ -63,7 +63,11 @@ export function buildDxf(layers, { units = "mm" } = {}) {
 
   // ENTITIES
   g(0, "SECTION"); g(2, "ENTITIES");
-  for (const [rawName, lines] of layers) {
+  // Camadas _VISTA primeiro: o CAD desenha na ordem do arquivo, então o corte
+  // (colorido) fica por cima das linhas de vista (cinza) que coincidem com ele.
+  const ordered = [...layers].sort((a, b) => a[0].toUpperCase().endsWith("_VISTA") === b[0].toUpperCase().endsWith("_VISTA")
+    ? 0 : a[0].toUpperCase().endsWith("_VISTA") ? -1 : 1);
+  for (const [rawName, lines] of ordered) {
     const layer = safeLayer(rawName);
     for (const { points, closed } of lines) {
       if (points.length < 2) continue;

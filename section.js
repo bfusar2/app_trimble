@@ -155,7 +155,11 @@ function removeCollinear(pts, closed, tol) {
     const a = pts[(i - 1 + n) % n], b = pts[i], c = pts[(i + 1) % n];
     const area = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
     const len = Math.hypot(c[0] - a[0], c[1] - a[1]) || 1;
-    if (Math.abs(area) / len > tol) res.push(b); // mantém só se não for colinear
+    // Só remove o ponto se a linha segue em frente. Se ela volta sobre si mesma
+    // (a→b→c com c antes de b), o ponto b marca o fim do trecho e precisa ficar:
+    // removê-lo apagaria parte da linha.
+    const forward = (b[0] - a[0]) * (c[0] - b[0]) + (b[1] - a[1]) * (c[1] - b[1]) > 0;
+    if (Math.abs(area) / len > tol || !forward) res.push(b);
   }
   return res;
 }
