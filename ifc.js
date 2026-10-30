@@ -3,7 +3,9 @@
 // Aqui tudo é convertido para o padrão IFC/Trimble: metros, eixo Z para cima.
 
 const V = new URL(import.meta.url).search;
-const [{ sliceMesh }, { canonGuid }] = await Promise.all([import(`./section.js${V}`), import(`./guid.js${V}`)]);
+const [{ sliceMesh }, { canonGuid }, { projectMeshDepth }] = await Promise.all([
+  import(`./section.js${V}`), import(`./guid.js${V}`), import(`./depth.js${V}`),
+]);
 
 const WEB_IFC_VERSION = "0.0.66";
 const WEB_IFC_URL = `https://cdn.jsdelivr.net/npm/web-ifc@${WEB_IFC_VERSION}/`;
@@ -120,17 +122,35 @@ export function sampleBoxes(model, limit = 40) {
 
 /**
  * Corta o modelo pelo plano (já no espaço do IFC: metros, Z para cima).
- * Retorna Map<tipoIfc, segmentos 2D [u1,v1,u2,v2,...]> em (metros × scale).
+ * Retorna segmentos do plano e da vista em profundidade, separados por tipo IFC.
+ * depth em metros; direction = -1 ou 1 indica o lado da normal do plano.
  * filterGuids: Set opcional de GUIDs na forma canônica (canonGuid) — corta só esses elementos.
  */
-export function cutModel(model, plane, { scale = 1000, filterGuids = null } = {}) {
+export function cutModel(model, plane, { scale = 1000, filterGuids = null, depth = 0, direction = -1 } = {}) {
+  if (!Number.isFinite(depth) || depth < 0) throw new Error("Informe uma profundidade válida, maior ou igual a zero.");
+  if (direction !== -1 && direction !== 1) throw new Error("Sentido da profundidade inválido.");
   const result = new Map();
-  let elements = new Set();
+  const views = new Map();
+  const elements = new Set(), sectionElements = new Set(), viewElements = new Set();
   forEachMesh(model, ({ expressID, type, positions, index }) => {
     if (filterGuids && !filterGuids.has(canonGuid(model.guidOf(expressID)))) return;
     if (!result.has(type)) result.set(type, []);
-    if (sliceMesh(positions, index, plane, scale, result.get(type)) > 0) elements.add(expressID);
+    if (sliceMesh(positions, index, plane, scale, result.get(type)) > 0) {
+      elements.add(expressID);
+      sectionElements.add(expressID);
+    }
+    if (depth > 0) {
+      if (!views.has(type)) views.set(type, []);
+      if (projectMeshDepth(positions, index, plane, { depth, direction, scale }, views.get(type)) > 0) {
+        elements.add(expressID);
+        viewElements.add(expressID);
+      }
+    }
   });
   for (const [k, v] of result) if (!v.length) result.delete(k);
-  return { segmentsByType: result, elementCount: elements.size };
+  for (const [k, v] of views) if (!v.length) views.delete(k);
+  return {
+    segmentsByType: result, viewSegmentsByType: views, elementCount: elements.size,
+    sectionElementCount: sectionElements.size, viewElementCount: viewElements.size,
+  };
 }

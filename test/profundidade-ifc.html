@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><title>Teste IFC com profundidade</title>
+<style>body{font:14px system-ui;padding:16px;color:#252a2e}.ok{color:#1e8a44}.falha{color:#c81922}svg{border:1px solid #ddd;max-width:100%;height:300px}figure{display:inline-block;margin:12px}pre{white-space:pre-wrap}</style>
+</head>
+<body>
+  <h1>IFC → corte e vista com profundidade</h1>
+  <ul id="out"></ul>
+  <div id="preview"></div>
+  <script type="module">
+    import { openIfc, cutModel } from "../ifc.js";
+    import { makeSectionPlane, chainSegments } from "../section.js";
+    import { buildDxf } from "../dxf.js";
+    import { canonGuid } from "../guid.js";
+
+    const results = [];
+    const check = (nome, ok) => results.push({ nome, ok: !!ok });
+    let model;
+    try {
+      model = await openIfc(await (await fetch("teste.ifc")).arrayBuffer());
+      const high = makeSectionPlane([0, 0, 4], [0, 0, 1]);
+      const legacy = cutModel(model, high);
+      check("Sem profundidade, plano acima do modelo não corta elementos", legacy.elementCount === 0 && legacy.viewSegmentsByType.size === 0);
+      const short = cutModel(model, high, { depth: 0.5 });
+      check("Objetos além da profundidade são excluídos", short.elementCount === 0);
+      const view = cutModel(model, high, { depth: 2 });
+      check("Objetos sem tocar a tesoura entram na vista", view.elementCount === 3 && view.sectionElementCount === 0 && view.viewElementCount === 3);
+      check("Faixa sem atingir a laje não inclui IFCSLAB", !view.viewSegmentsByType.has("IFCSLAB"));
+      const all = cutModel(model, high, { depth: 5 });
+      check("Aumentar profundidade inclui também a laje", all.elementCount === 4 && all.viewSegmentsByType.has("IFCSLAB"));
+      const reverse = cutModel(model, high, { depth: 5, direction: 1 });
+      check("Inverter sentido acima do modelo gera vista vazia", reverse.elementCount === 0);
+
+      const plane = makeSectionPlane([0, 0, 1.5], [0, 0, 1]);
+      const section = cutModel(model, plane);
+      const deep = cutModel(model, plane, { depth: 2 });
+      check("Vista mantém os três elementos do plano e inclui a laje", section.elementCount === 3 && deep.sectionElementCount === 3 && deep.elementCount === 4);
+      const onlySlab = cutModel(model, plane, { depth: 2, filterGuids: new Set([canonGuid("1kTvXnbbzCWw8lcMd1dR4o")]) });
+      check("Filtro seleciona laje apenas em vista, sem interseção com o plano", onlySlab.elementCount === 1 && onlySlab.sectionElementCount === 0 && onlySlab.viewSegmentsByType.size === 1 && onlySlab.viewSegmentsByType.has("IFCSLAB"));
+      const metres = cutModel(model, plane, { depth: 2, scale: 1 });
+      const mm = deep.viewSegmentsByType.get("IFCSLAB"), m = metres.viewSegmentsByType.get("IFCSLAB");
+      check("Unidade do DXF não altera a profundidade em metros", mm.length === m.length && mm.every((x, i) => Math.abs(x - m[i] * 1000) < 1e-6));
+
+      const layers = new Map();
+      for (const [type, segs] of deep.segmentsByType) layers.set(type, chainSegments(segs, 0.5));
+      for (const [type, segs] of deep.viewSegmentsByType) layers.set(`${type}_VISTA`, chainSegments(segs, 0.5));
+      const dxf = buildDxf(layers);
+      check("DXF inclui camadas de corte e _VISTA", layers.has("IFCWALL") && layers.has("IFCSLAB_VISTA") && dxf.includes("IFCSLAB_VISTA\r\n") && dxf.endsWith("0\r\nEOF\r\n"));
+      check("DXF não contém coordenadas inválidas", !/NaN|Infinity/.test(dxf));
+
+      for (const [title, data] of [["Profundidade 0 m — somente o plano", section], ["Profundidade 2 m — plano e laje em vista", deep]]) {
+        const figure = document.createElement("figure");
+        const caption = document.createElement("figcaption"); caption.textContent = title;
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("viewBox", "-100 -5100 5200 5200");
+        for (const [map, color] of [[data.viewSegmentsByType, "#888"], [data.segmentsByType, "#0063a3"]]) {
+          for (const segs of map.values()) for (let i = 0; i < segs.length; i += 4) {
+            const line = document.createElementNS(svg.namespaceURI, "line");
+            for (const [name, value] of [["x1", segs[i]], ["y1", -segs[i + 1]], ["x2", segs[i + 2]], ["y2", -segs[i + 3]]]) line.setAttribute(name, value);
+            line.setAttribute("stroke", color); line.setAttribute("stroke-width", "16"); svg.append(line);
+          }
+        }
+        figure.append(caption, svg); document.getElementById("preview").append(figure);
+      }
+    } catch (err) { results.push({ nome: String(err.stack || err), ok: false }); }
+    finally { model?.close(); }
+    for (const result of results) {
+      const li = document.createElement("li"); li.className = result.ok ? "ok" : "falha";
+      li.textContent = `${result.ok ? "OK" : "FALHA"} — ${result.nome}`; document.getElementById("out").append(li);
+    }
+    window.__result = { total: results.length, falhas: results.filter((r) => !r.ok) };
+  </script>
+</body>
+</html>

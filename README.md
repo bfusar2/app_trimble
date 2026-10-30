@@ -11,7 +11,8 @@ Trimble Connect for Browser. Cada tipo de elemento vira uma camada
 3. Abre o IFC no próprio navegador ([web-ifc](https://github.com/ThatOpen/engine_web-ifc)).
 4. Alinha as coordenadas do IFC com as do visualizador comparando caixas envolventes dos mesmos objetos.
 5. Calcula a interseção do plano com todos os triângulos e junta os segmentos em polilinhas.
-6. Baixa o `.dxf` (R12, unidades em mm ou m).
+6. Projeta também os contornos dos elementos entre o plano e a profundidade informada.
+7. Baixa o `.dxf` (R12, unidades em mm ou m).
 
 Nada sai do navegador do usuário: não existe servidor próprio.
 
@@ -24,7 +25,25 @@ O DXF abre direto no AutoCAD, BricsCAD, ZWCAD, QCAD etc. Para ter DWG:
 ### Limitações
 - Só modelos **IFC** (RVT, SKP, DWG 3D etc. precisam ser exportados como IFC antes).
 - Corta com **um plano** por vez (a tesoura de plano; caixa de corte ainda não).
-- Gera só a linha de corte (não desenha o que está "em vista" além do plano).
+- A vista em profundidade projeta contornos e arestas, sem remover linhas ocultas entre objetos: elementos sobrepostos podem aparecer juntos no DXF.
+
+### Profundidade do corte
+
+Digite a **Profundidade da vista (m)** no painel, por exemplo `5` para incluir os
+elementos até 5 metros a partir da tesoura. O valor é sempre em metros, mesmo quando
+o DXF é exportado em milímetros. O padrão é 5 m. Use **Inverter sentido da profundidade**
+para obter a vista do outro lado do plano; por padrão a faixa segue o sentido oposto
+à normal do plano (em uma planta com normal para cima, olha para baixo).
+
+Elementos que não tocam a tesoura também aparecem se estiverem dentro da faixa.
+Objetos que atravessam o limite são recortados à profundidade informada; esse limite
+também pode produzir um contorno de recorte. Com profundidade `0`, o app mantém a
+exportação anterior, somente das interseções com o plano.
+
+As linhas do plano continuam nas camadas por tipo IFC (`IFCWALL`, `IFCSLAB`, etc.).
+Os contornos da vista ficam em camadas separadas com sufixo `_VISTA`, em cinza,
+para facilitar ligar/desligar a projeção no CAD. As contagens de corte e vista podem
+incluir o mesmo elemento; o total conta cada elemento uma vez por modelo.
 
 ## Arquivos
 
@@ -34,6 +53,7 @@ O DXF abre direto no AutoCAD, BricsCAD, ZWCAD, QCAD etc. Para ter DWG:
 | `app.js` | Integração com o Trimble Connect (plano, modelos, token, download) |
 | `ifc.js` | Leitura do IFC e corte da geometria |
 | `section.js` | Matemática do corte e montagem das polilinhas |
+| `depth.js` | Projeção de arestas e contornos na faixa de profundidade |
 | `dxf.js` | Gerador do arquivo DXF |
 | `manifest.json` | Registro da extensão no Trimble Connect |
 | `test/` | IFC de teste e página que roda o corte sem o Trimble |
@@ -56,6 +76,8 @@ Com o servidor local rodando, abra no navegador:
 - `test/unitarios.html` — conversão de GUID e medidas em cortes horizontais, verticais e inclinados;
 - `test/alinhamento.html` — alinhamento IFC × visualizador (UTM, milímetros, girado, objetos errados);
 - `test/teste.html` — corte completo do IFC de exemplo.
+- `test/profundidade.html` — geometria da vista, limites de profundidade, sentido e projeção;
+- `test/profundidade-ifc.html` — corte e vista com IFC real, seleção e DXF, com comparação visual.
 
 ## Alinhamento
 

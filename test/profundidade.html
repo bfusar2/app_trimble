@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><title>Testes da profundidade</title>
+<style>body{font:14px system-ui;padding:16px}.ok{color:#18763a}.falha{color:#c81922;font-weight:600}</style></head>
+<body>
+  <h1>Profundidade do corte</h1>
+  <p>Testes de recorte da faixa e projeção ortogonal. A vista inclui linhas de objetos sobrepostos; não há remoção de linhas ocultas.</p>
+  <ul id="out"></ul>
+  <script type="module">
+    import { projectMeshDepth } from "../depth.js";
+    import { makeSectionPlane } from "../section.js";
+
+    const results = [];
+    const check = (nome, cond, detalhe = "") => results.push({ nome, ok: !!cond, detalhe });
+    const near = (a, b, tol = 1e-6) => Math.abs(a - b) <= tol;
+    function mesh(points, index) { return { positions: new Float64Array(points.flat()), indices: new Uint32Array(index) }; }
+    function box(min, max) {
+      const [x,y,z] = min, [X,Y,Z] = max;
+      return mesh([[x,y,z],[X,y,z],[X,Y,z],[x,Y,z],[x,y,Z],[X,y,Z],[X,Y,Z],[x,Y,Z]],
+        [0,2,1,0,3,2,4,5,6,4,6,7,0,1,5,0,5,4,3,7,6,3,6,2,0,4,7,0,7,3,1,2,6,1,6,5]);
+    }
+    const plane = makeSectionPlane([0,0,0], [0,0,1]);
+    const run = (m, options = {}, p = plane) => {
+      const out = [];
+      const count = projectMeshDepth(m.positions, m.indices, p, { depth: 3, scale: 1, ...options }, out);
+      return { count, out };
+    };
+    const bounds = (out) => {
+      const xs = out.filter((_,i) => i % 2 === 0), ys = out.filter((_,i) => i % 2 === 1);
+      return [Math.min(...xs),Math.min(...ys),Math.max(...xs),Math.max(...ys)];
+    };
+    const perimeter = (out) => {
+      let length = 0;
+      for (let i=0;i<out.length;i+=4) length += Math.hypot(out[i+2]-out[i],out[i+3]-out[i+1]);
+      return length;
+    };
+    const axisAligned = (out) => {
+      for (let i=0;i<out.length;i+=4) if (!near(out[i],out[i+2]) && !near(out[i+1],out[i+3])) return false;
+      return true;
+    };
+    const inRange = box([0,0,-2],[2,3,-1]);
+    let r = run(inRange);
+    check("Caixa dentro da faixa gera quatro contornos, sem diagonais", r.count === 4 && axisAligned(r.out) && near(perimeter(r.out),10));
+    check("Coordenadas da projeção preservadas", bounds(r.out).every((x,i)=>near(x,[0,0,2,3][i])));
+    check("Objeto além da profundidade é excluído", run(inRange,{depth:0.5}).count === 0);
+    check("Objeto do lado oposto é excluído", run(box([0,0,1],[2,3,2])).count === 0);
+    check("Inverter sentido inclui objeto do outro lado", run(box([0,0,1],[2,3,2]),{direction:1}).count === 4);
+    check("Sentido invertido exclui o lado original", run(inRange,{direction:1}).count === 0);
+    check("Profundidade zero não adiciona vista", run(inRange,{depth:0}).count === 0);
+    check("Aumentar profundidade inclui objeto inteiro sem precisar cruzar a tesoura", run(inRange,{depth:2.5}).count > 0);
+    r = run(box([0,0,-10],[2,3,10]),{depth:0.5});
+    check("Caixa que atravessa toda a faixa é recortada", r.count === 4 && near(perimeter(r.out),10));
+    check("Contornos sobrepostos dos dois limites não são duplicados", r.out.length === 16);
+
+    // Nenhum vértice do triângulo está entre d=0 e d=1; a faixa ainda o cruza.
+    r = run(mesh([[-2,0,1],[2,0,-3],[0,4,-3]],[0,1,2]),{depth:1});
+    check("Triângulo atravessado sem vértices dentro gera quatro bordas", r.count === 4);
+    check("Interseções dos planos limitam a geometria ao quadrilátero esperado", bounds(r.out).every((x,i)=>near(x,[-1.5,0,0,2][i])));
+    for (const d of [0,3]) {
+      const m = mesh([[0,0,-d],[2,0,-d],[2,3,-d],[0,3,-d]],[0,1,2,0,2,3]);
+      r = run(m);
+      check(`Face coplanar ao limite d=${d}: sem diagonal da triangulação`,r.count===4 && axisAligned(r.out) && near(perimeter(r.out),10));
+    }
+    const duplicated = mesh([[0,0,-1],[2,0,-1],[2,3,-1],[0,0,-1],[2,3,-1],[0,3,-1]],[0,1,2,3,4,5]);
+    check("Vértices duplicados por face não revelam diagonal", run(duplicated).count === 4);
+    const reversed = mesh([[0,0,-1],[2,0,-1],[2,3,-1],[0,3,-1]],[0,1,2,0,3,2]);
+    check("Triângulos coplanares com winding invertido não revelam diagonal", run(reversed).count === 4);
+    const roof = mesh([[-1,0,-1.1],[0,0,-1],[0,2,-1],[-1,2,-1.1],[1,0,-1.1],[1,2,-1.1]], [0,1,2,0,2,3,1,4,5,1,5,2]);
+    const roofView = run(roof, { depth: 2 }).out;
+    let ridge = false;
+    for (let i = 0; i < roofView.length; i += 4)
+      if (near(roofView[i], 0) && near(roofView[i + 2], 0) && near(Math.abs(roofView[i + 3] - roofView[i + 1]), 2)) ridge = true;
+    check("Cobertura de duas águas pouco inclinada mantém a cumeeira", ridge);
+    r = run(inRange,{scale:1000});
+    check("Saída em milímetros tem escala correta", near(perimeter(r.out),10000) && near(bounds(r.out)[3],3000));
+    const original = run(box([5,2,-2],[7,5,-1]));
+    const mirrored = run(box([5,2,-2],[7,5,-1]),{},makeSectionPlane([0,0,0],[0,0,1],{mirror:true}));
+    check("Espelhar altera X sem alterar medidas", near(bounds(mirrored.out)[0],-7) && near(bounds(mirrored.out)[2],-5) && near(perimeter(mirrored.out),perimeter(original.out)));
+    r = run(box([734670,7527112,-2],[734672,7527115,-1]));
+    check("Coordenadas UTM mantêm posição e medidas",r.count===4 && near(perimeter(r.out),10) && near(bounds(r.out)[0],734670) && near(bounds(r.out)[1],7527112));
+
+    // O mesmo sólido em coordenadas de diferentes planos conserva a projeção.
+    for (const [name,normal] of [["vertical",[0,1,0]],["inclinado",[0.3,0.4,Math.sqrt(0.75)]],["horizontal invertido",[0,0,-1]]]) {
+      const p = makeSectionPlane([10,20,30],normal);
+      const m = box([0,0,-2],[2,3,-1]);
+      const positions = [];
+      for(let i=0;i<m.positions.length;i+=3) {
+        const [u,v,d] = m.positions.slice(i,i+3);
+        positions.push(...p.point.map((x,k)=>x+p.u[k]*u+p.v[k]*v+p.normal[k]*d));
+      }
+      r = run({...m,positions:new Float64Array(positions)},{},p);
+      check(`Plano ${name}: perímetro preservado`, near(perimeter(r.out),10));
+    }
+    check("Triângulo degenerado é descartado", run(mesh([[0,0,-1],[1,0,-1],[2,0,-1]],[0,1,2])).count===0);
+    const invalid = [
+      ["profundidade negativa",{depth:-1}], ["profundidade infinita",{depth:Infinity}],
+      ["profundidade NaN",{depth:NaN}], ["sentido inválido",{direction:0}], ["escala nula",{scale:0}],
+    ];
+    for (const [name,options] of invalid) {
+      let rejected=false;try{run(inRange,options);}catch{rejected=true;}
+      check(`Rejeita ${name}`,rejected);
+    }
+    let rejected=false;
+    try{run(mesh([[NaN,0,-1],[1,0,-1],[0,1,-1]],[0,1,2]));}catch{rejected=true;}
+    check("Rejeita vértice não finito",rejected);
+    const overlapA=run(box([0,0,-1],[2,3,-0.5]));
+    const overlapB=run(box([0.5,0.5,-2],[1.5,2.5,-1.5]));
+    check("Vista mantém linhas de objetos sobrepostos (sem ocultação)",overlapA.count===4 && overlapB.count===4);
+
+    const ul=document.getElementById("out");
+    for(const r of results){const li=document.createElement("li");li.className=r.ok?"ok":"falha";li.textContent=`${r.ok?"OK":"FALHA"} — ${r.nome}${r.detalhe?" — "+r.detalhe:""}`;ul.append(li);}
+    window.__result={total:results.length,falhas:results.filter(r=>!r.ok)};
+  </script>
+</body>
+</html>

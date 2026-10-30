@@ -331,7 +331,13 @@ async function generate() {
       onlySelected: $("opt-selected").checked,
       mirror: $("opt-mirror").checked,
       units: $("opt-units").value,
+      depth: Number($("opt-depth").value),
+      direction: $("opt-depth-reverse").checked ? 1 : -1,
     };
+    if (!$("opt-depth").value.trim() || !Number.isFinite(opts.depth) || opts.depth < 0) {
+      throw new Error("Informe uma profundidade em metros, maior ou igual a zero.");
+    }
+    log("Profundidade da vista", { metros: opts.depth, sentido: opts.direction });
     const scale = opts.units === "m" ? 1 : 1000;
     const file = $("file").files?.[0];
 
@@ -352,6 +358,7 @@ async function generate() {
 
     const layers = new Map();
     let total = 0;
+    let sectionTotal = 0, viewTotal = 0;
     let unverified = false; // true se algum modelo foi cortado sem alinhamento verificado
 
     for (const job of jobs) {
@@ -404,15 +411,24 @@ async function generate() {
         const filterGuids = EMBEDDED && opts.onlySelected && job.modelId ? await selectedGuids(job.modelId) : null;
         if (filterGuids && !filterGuids.size) throw new Error("Nenhum objeto selecionado neste modelo.");
 
-        progress(`Cortando ${job.label}…`);
+        progress(`${opts.depth > 0 ? "Gerando corte e vista de" : "Cortando"} ${job.label}…`);
         await nextFrame();
         const plane = makeSectionPlane(planeIfc.point, planeIfc.normal, { mirror: opts.mirror });
-        const { segmentsByType, elementCount } = cutModel(model, plane, { scale, filterGuids });
+        const { segmentsByType, viewSegmentsByType, elementCount, sectionElementCount, viewElementCount } = cutModel(
+          model, plane, { scale, filterGuids, depth: opts.depth, direction: opts.direction }
+        );
         total += elementCount;
+        sectionTotal += sectionElementCount;
+        viewTotal += viewElementCount;
 
         for (const [type, segs] of segmentsByType) {
           const lines = chainSegments(segs, scale === 1000 ? 0.5 : 0.0005);
           layers.set(type, (layers.get(type) || []).concat(lines));
+        }
+        for (const [type, segs] of viewSegmentsByType) {
+          const layer = `${type}_VISTA`;
+          const lines = chainSegments(segs, scale === 1000 ? 0.5 : 0.0005);
+          layers.set(layer, (layers.get(layer) || []).concat(lines));
         }
       } finally {
         model.close();
@@ -421,7 +437,9 @@ async function generate() {
 
     if (!total) {
       throw new Error(
-        opts.onlySelected
+        opts.depth > 0
+          ? "Nenhum contorno encontrado nessa profundidade. Aumente a distância ou inverta o sentido da profundidade."
+          : opts.onlySelected
           ? "A tesoura não cruza os objetos selecionados. Desmarque 'Só objetos selecionados' ou mova o plano."
           : "O plano não cortou nenhum elemento. Confira a posição da tesoura (veja o Log)."
       );
@@ -431,7 +449,7 @@ async function generate() {
     const name = `corte_${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "")}.dxf`;
     offerDownload(dxf, name);
     progress(
-      `Pronto: ${total} elemento(s) cortado(s), ${layers.size} camada(s).` +
+      `Pronto: ${total} elemento(s), ${sectionTotal} no plano, ${viewTotal} em vista, ${layers.size} camada(s).` +
         (unverified ? " Atenção: alinhamento não verificado, confira as coordenadas no CAD." : "")
     );
   } finally {

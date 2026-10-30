@@ -56,7 +56,7 @@ export function buildDxf(layers, { units = "mm" } = {}) {
   layerDef("0", 7);
   names.forEach((name, i) => {
     const base = name.toUpperCase();
-    layerDef(name, KNOWN_COLORS[base] ?? FALLBACK[i % FALLBACK.length]);
+    layerDef(name, base.endsWith("_VISTA") ? 8 : KNOWN_COLORS[base] ?? FALLBACK[i % FALLBACK.length]);
   });
   g(0, "ENDTAB");
   g(0, "ENDSEC");
