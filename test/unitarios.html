@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="pt-BR">
+<head><meta charset="utf-8" /><title>Testes unitários</title>
+<style>body{font:14px system-ui;padding:16px}.ok{color:#1e8a44}.falha{color:#c81922;font-weight:600}</style></head>
+<body>
+  <h1>Testes unitários</h1>
+  <ul id="out"></ul>
+  <script type="module">
+    import { expandIfcGuid, compressIfcGuid, canonGuid } from "../guid.js";
+    import { makeSectionPlane, sliceMesh } from "../section.js";
+
+    const results = [];
+    const check = (nome, cond, detalhe = "") => results.push({ nome, ok: !!cond, detalhe });
+    const near = (a, b, tol = 1e-9) => Math.abs(a - b) <= tol;
+    const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    const len = (a) => Math.hypot(...a);
+
+    // ---------- GUID: layout de bits (1º caractere = 2 bits mais altos) ----------
+    check("GUID zero", expandIfcGuid("0000000000000000000000") === "00000000-0000-0000-0000-000000000000");
+    check("GUID máximo", expandIfcGuid("3$$$$$$$$$$$$$$$$$$$$$") === "ffffffff-ffff-ffff-ffff-ffffffffffff");
+    check("GUID bit mais baixo", expandIfcGuid("0000000000000000000001") === "00000000-0000-0000-0000-000000000001");
+    check("GUID bit 126 (1º char)", expandIfcGuid("1000000000000000000000") === "40000000-0000-0000-0000-000000000000");
+    check("GUID '$' vale 63", expandIfcGuid("000000000000000000000$") === "00000000-0000-0000-0000-00000000003f");
+
+    // Ida e volta com os GUIDs do IFC de teste
+    for (const g of ["0YvctVUKr0kugbFTf53O9L", "2O2Fr$t4X7Zf8NOew3FLOH", "3cUkl32yn9qRSPvBJVyWYp", "1kTvXnbbzCWw8lcMd1dR4o"]) {
+      const e = expandIfcGuid(g);
+      check(`GUID ida e volta ${g}`, compressIfcGuid(e) === g, e);
+    }
+
+    // Inválidos
+    check("GUID com 1º char > 3 é inválido", expandIfcGuid("4000000000000000000000") === null);
+    check("GUID com caractere fora da base é inválido", expandIfcGuid("000000000000000000000#") === null);
+    check("GUID com tamanho errado é inválido", expandIfcGuid("abc") === null);
+
+    // Normalização: compactado, UUID minúsculo/maiúsculo e com chaves dão o mesmo valor
+    const g = "2O2Fr$t4X7Zf8NOew3FLOH";
+    const e = expandIfcGuid(g);
+    const forms = [g, e, e.toUpperCase(), `{${e}}`, e.replace(/-/g, "")];
+    check("canonGuid unifica as formas", new Set(forms.map(canonGuid)).size === 1, forms.map(canonGuid)[0]);
+    check("canonGuid de valor estranho volta igual", canonGuid("abc-123") === "abc-123");
+
+    // ---------- Projeção: base ortonormal em qualquer inclinação ----------
+    const normals = {
+      horizontal: [0, 0, 1],
+      "horizontal invertido": [0, 0, -1],
+      "inclinado 17,5°": [0, Math.sin((17.5 * Math.PI) / 180), Math.cos((17.5 * Math.PI) / 180)],
+      "inclinado 25° (limite)": [Math.sin((25 * Math.PI) / 180), 0, Math.cos((25 * Math.PI) / 180)],
+      "inclinado 26° (outro ramo)": [Math.sin((26 * Math.PI) / 180), 0, Math.cos((26 * Math.PI) / 180)],
+      "inclinado 45°": [0.5, 0.5, Math.SQRT1_2],
+      vertical: [0, 1, 0],
+      "vertical do seu modelo": [0.29, -0.96, 0],
+    };
+    for (const [nome, n] of Object.entries(normals)) {
+      for (const mirror of [false, true]) {
+        const p = makeSectionPlane([0, 0, 0], n, { mirror });
+        const ok =
+          near(len(p.u), 1, 1e-12) && near(len(p.v), 1, 1e-12) &&
+          near(dot(p.u, p.v), 0, 1e-12) && near(dot(p.u, p.normal), 0, 1e-12) && near(dot(p.v, p.normal), 0, 1e-12);
+        check(`Base ortonormal: ${nome}${mirror ? " (espelhado)" : ""}`, ok);
+      }
+    }
+
+    // Orientação mantida nos casos comuns
+    const h = makeSectionPlane([0, 0, 0], [0, 0, 1]);
+    check("Planta: u = X, v = Y", h.u.join() === "1,0,0" && h.v.join() === "0,1,0", `${h.u} / ${h.v}`);
+    const hi = makeSectionPlane([0, 0, 0], [0, 0, -1]);
+    check("Planta com normal para baixo: u = X, v = Y", near(hi.u[0], 1) && near(hi.v[1], 1), `${hi.u} / ${hi.v}`);
+    const vt = makeSectionPlane([0, 0, 0], [0, 1, 0]);
+    check("Corte vertical: v aponta para cima (Z)", near(vt.v[2], 1), `${vt.v}`);
+
+    // ---------- Medida preservada: segmento de comprimento conhecido ----------
+    // Um triângulo grande atravessado pelo plano; o segmento de corte é medido em 3D e em 2D.
+    for (const [nomeN, n] of Object.entries(normals)) for (const eixo of ["u", "v"]) {
+      const nome = `${nomeN}, ao longo de ${eixo}`;
+      const plane = makeSectionPlane([0, 0, 0], n);
+      const dir = plane[eixo], other = eixo === "u" ? plane.v : plane.u;
+      // dois pontos acima do plano, separados por 1 m ao longo do eixo, e um ponto abaixo
+      const a = [0, 1, 2].map((k) => -0.5 * dir[k] + 0.3 * plane.normal[k]);
+      const b = [0, 1, 2].map((k) => 0.5 * dir[k] + 0.3 * plane.normal[k]);
+      const c = [0, 1, 2].map((k) => -0.6 * plane.normal[k] + 0.2 * other[k]);
+      // corte real em 3D: interseção das arestas a-c e b-c com o plano
+      const cutPt = (p, q) => {
+        const dp = dot(p, plane.normal), dq = dot(q, plane.normal);
+        const t = dp / (dp - dq);
+        return p.map((x, k) => x + (q[k] - x) * t);
+      };
+      const p1 = cutPt(a, c), p2 = cutPt(b, c);
+      const real = len(p1.map((x, k) => x - p2[k]));
+      const out = [];
+      sliceMesh(new Float64Array([...a, ...b, ...c]), new Uint32Array([0, 1, 2]), plane, 1, out);
+      const got = Math.hypot(out[2] - out[0], out[3] - out[1]);
+      check(`Medida preservada: ${nome}`, near(got, real, 1e-9), `real ${real.toFixed(6)} / DXF ${got.toFixed(6)}`);
+    }
+
+    // Entradas inválidas
+    let threw = false;
+    try { makeSectionPlane([0, 0, 0], [0, 0, 0]); } catch { threw = true; }
+    check("Normal nula é rejeitada", threw);
+    threw = false;
+    try { makeSectionPlane([NaN, 0, 0], [0, 0, 1]); } catch { threw = true; }
+    check("Coordenada inválida é rejeitada", threw);
+
+    // ---------- mostra ----------
+    const ul = document.getElementById("out");
+    for (const r of results) {
+      const li = document.createElement("li");
+      li.className = r.ok ? "ok" : "falha";
+      li.textContent = `${r.ok ? "OK" : "FALHA"} — ${r.nome}${r.detalhe ? " — " + r.detalhe : ""}`;
+      ul.append(li);
+    }
+    window.__result = { total: results.length, falhas: results.filter((r) => !r.ok) };
+  </script>
+</body>
+</html>

@@ -2,7 +2,8 @@
 // Coordenadas devolvidas pelo web-ifc: metros, eixo Y para cima.
 // Aqui tudo é convertido para o padrão IFC/Trimble: metros, eixo Z para cima.
 
-import { sliceMesh } from "./section.js";
+const V = new URL(import.meta.url).search;
+const [{ sliceMesh }, { canonGuid }] = await Promise.all([import(`./section.js${V}`), import(`./guid.js${V}`)]);
 
 const WEB_IFC_VERSION = "0.0.66";
 const WEB_IFC_URL = `https://cdn.jsdelivr.net/npm/web-ifc@${WEB_IFC_VERSION}/`;
@@ -120,13 +121,13 @@ export function sampleBoxes(model, limit = 40) {
 /**
  * Corta o modelo pelo plano (já no espaço do IFC: metros, Z para cima).
  * Retorna Map<tipoIfc, segmentos 2D [u1,v1,u2,v2,...]> em (metros × scale).
- * filterGuids: Set opcional — corta só esses elementos.
+ * filterGuids: Set opcional de GUIDs na forma canônica (canonGuid) — corta só esses elementos.
  */
 export function cutModel(model, plane, { scale = 1000, filterGuids = null } = {}) {
   const result = new Map();
   let elements = new Set();
   forEachMesh(model, ({ expressID, type, positions, index }) => {
-    if (filterGuids && !filterGuids.has(model.guidOf(expressID))) return;
+    if (filterGuids && !filterGuids.has(canonGuid(model.guidOf(expressID)))) return;
     if (!result.has(type)) result.set(type, []);
     if (sliceMesh(positions, index, plane, scale, result.get(type)) > 0) elements.add(expressID);
   });

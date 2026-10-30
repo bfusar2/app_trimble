@@ -3,10 +3,25 @@
 //        -> corta a geometria -> monta polilinhas -> baixa o .dxf.
 // Aberto fora do Trimble Connect, funciona em "modo local": IFC do computador + plano manual.
 
-import { openIfc, sampleBoxes, cutModel } from "./ifc.js";
-import { makeSectionPlane, chainSegments } from "./section.js";
-import { buildDxf } from "./dxf.js";
-import { fitAlignment } from "./align.js";
+// A versão vem do index.html (app.js?v=N) e é repassada a todos os módulos,
+// para que cada publicação nova não seja servida do cache do navegador.
+const V = new URL(import.meta.url).search;
+const [
+  { openIfc, sampleBoxes, cutModel },
+  { makeSectionPlane, chainSegments },
+  { buildDxf },
+  { fitAlignment },
+  { expandIfcGuid, canonGuid },
+] = await Promise.all([
+  import(`./ifc.js${V}`),
+  import(`./section.js${V}`),
+  import(`./dxf.js${V}`),
+  import(`./align.js${V}`),
+  import(`./guid.js${V}`),
+]);
+
+// Erro médio máximo aceito no alinhamento (m). Acima disso o corte não é exportado.
+const MAX_ALIGN_ERROR_M = 0.1;
 
 const $ = (id) => document.getElementById(id);
 const EMBEDDED = window.parent !== window;
@@ -42,6 +57,8 @@ const vec = (p) => (Array.isArray(p) ? p : [p.x, p.y, p.z]);
 // ---------------- conexão ----------------
 
 async function init() {
+  $("version").textContent = V ? V.replace("?v=", "v") : "";
+  log(`Versão ${V || "(sem número)"}`);
   $("btn-refresh").onclick = refresh;
   $("btn-generate").onclick = () => generate().catch(onError);
   $("file").onchange = renderModels;
@@ -250,7 +267,26 @@ async function calibrate(modelId, ifcModel) {
   const samples = sampleBoxes(ifcModel, 40);
   if (!samples.length) throw new Error("sem amostras");
 
-  const runtimeIds = await API.viewer.convertToObjectRuntimeIds(modelId, samples.map((s) => s.guid));
+  // A documentação pede o GUID descompactado; o compactado fica como reserva.
+  const formats = [
+    ["descompactado", (g) => expandIfcGuid(g) || g],
+    ["descompactado maiúsculo", (g) => (expandIfcGuid(g) || g).toUpperCase()],
+    ["compactado", (g) => g],
+  ];
+  let runtimeIds = [];
+  let hits = -1;
+  for (const [name, fmt] of formats) {
+    let r = [];
+    try {
+      r = (await API.viewer.convertToObjectRuntimeIds(modelId, samples.map((s) => fmt(s.guid)))) || [];
+    } catch (err) {
+      log(`convertToObjectRuntimeIds (${name}) falhou`, String(err));
+    }
+    const h = r.filter((x) => x != null).length;
+    log(`GUIDs ${name}: ${h}/${samples.length} encontrados`);
+    if (h > hits) [runtimeIds, hits] = [r, h];
+    if (h === samples.length) break;
+  }
   const byRuntime = new Map();
   runtimeIds.forEach((rid, i) => rid != null && byRuntime.set(rid, samples[i]));
   if (!byRuntime.size) throw new Error("GUIDs do IFC não encontrados no visualizador");
@@ -281,7 +317,8 @@ async function selectedGuids(modelId) {
   const sel = (await API.viewer.getSelection()) || [];
   const entry = sel.find((s) => s.modelId === modelId);
   if (!entry?.objectRuntimeIds?.length) return new Set();
-  return new Set(await API.viewer.convertToObjectIds(modelId, entry.objectRuntimeIds));
+  const ids = await API.viewer.convertToObjectIds(modelId, entry.objectRuntimeIds);
+  return new Set((ids || []).map(canonGuid).filter(Boolean)); // mesma forma usada no corte
 }
 
 // ---------------- gerar ----------------
@@ -315,6 +352,7 @@ async function generate() {
 
     const layers = new Map();
     let total = 0;
+    let unverified = false; // true se algum modelo foi cortado sem alinhamento verificado
 
     for (const job of jobs) {
       progress(`Baixando ${job.label}…`);
@@ -339,9 +377,15 @@ async function generate() {
                 objetosUsados: `${calib.n}/${calib.total}`,
                 erroMedio_m: +calib.residual.toFixed(3),
               });
-              if (calib.residual > 0.2) log("Atenção: alinhamento impreciso, o corte pode sair deslocado");
             } catch (err) {
+              unverified = true;
               log("Sem alinhamento automático, usando coordenadas do IFC", String(err));
+            }
+            if (calib && calib.residual > MAX_ALIGN_ERROR_M) {
+              throw new Error(
+                `Alinhamento não confiável (erro médio de ${(calib.residual * 100).toFixed(0)} cm). ` +
+                  "O corte não foi gerado para não sair deslocado. Veja o Log."
+              );
             }
           }
           planeIfc = planeToIfc(tcPlane, calib);
@@ -386,7 +430,10 @@ async function generate() {
     const dxf = buildDxf(layers, { units: opts.units });
     const name = `corte_${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "")}.dxf`;
     offerDownload(dxf, name);
-    progress(`Pronto: ${total} elemento(s) cortado(s), ${layers.size} camada(s).`);
+    progress(
+      `Pronto: ${total} elemento(s) cortado(s), ${layers.size} camada(s).` +
+        (unverified ? " Atenção: alinhamento não verificado, confira as coordenadas no CAD." : "")
+    );
   } finally {
     $("btn-generate").disabled = false;
   }

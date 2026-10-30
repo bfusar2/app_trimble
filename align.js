@@ -24,7 +24,11 @@ export function fitAlignment(pairs) {
 
   // 1) Unidade: potência de 10 mais próxima da razão das diagonais.
   const ratio = median(pairs.map((p) => diag(p.v) / (diag(p.ifc) || 1)));
-  const s = Math.pow(10, Math.round(Math.log10(ratio)));
+  const exp = Math.log10(ratio);
+  // Razão longe de qualquer potência de 10 (ex.: 30x) = unidade desconhecida ou pares errados.
+  if (!Number.isFinite(exp) || Math.abs(exp - Math.round(exp)) > 0.15)
+    throw new Error(`escala incoerente (razão ${ratio})`);
+  const s = Math.pow(10, Math.round(exp));
 
   const A = pairs.map((p) => center(p.ifc).map((x) => x * s));
   const B = pairs.map((p) => center(p.v));
@@ -64,6 +68,10 @@ export function fitAlignment(pairs) {
 
   // Rotação muito pequena é ruído: usa só deslocamento.
   if (Math.abs(theta) < (0.3 * Math.PI) / 180) fit(false);
+
+  const used = keep.filter(Boolean).length;
+  if (used < 3) throw new Error(`poucos objetos coerentes (${used}/${pairs.length})`);
+  if (![theta, ...t].every(Number.isFinite)) throw new Error("parâmetros inválidos");
 
   const c = Math.cos(theta), sn = Math.sin(theta);
   const ifcBounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };

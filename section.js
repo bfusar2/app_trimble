@@ -14,14 +14,19 @@ const norm = (a) => {
  * - Plano vertical/inclinado (corte/elevação): v aponta para cima (Z).
  */
 export function makeSectionPlane(point, normal, { mirror = false } = {}) {
+  if (![...point, ...normal].every(Number.isFinite)) throw new Error("Plano de corte com coordenadas inválidas.");
+  if (Math.hypot(normal[0], normal[1], normal[2]) < 1e-9) throw new Error("Plano de corte com normal nula.");
   const n = norm(normal);
+  // u e v: unitários, perpendiculares entre si e à normal (preserva medidas em qualquer inclinação).
   let u, v;
   if (Math.abs(n[2]) > 0.9) {
-    u = [1, 0, 0];
-    v = [0, 1, 0];
+    // Quase horizontal: X projetado no plano. Para plano horizontal dá exatamente X e Y.
+    const up = n[2] < 0 ? n.map((x) => -x) : n;
+    u = norm([1 - up[0] * up[0], -up[0] * up[1], -up[0] * up[2]]);
+    v = cross(up, u);
   } else {
     u = norm(cross(n, [0, 0, 1]));
-    v = norm(cross(u, n));
+    v = cross(u, n);
   }
   if (mirror) u = u.map((x) => -x);
   return { point, normal: n, u, v };

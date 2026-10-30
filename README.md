@@ -46,6 +46,23 @@ o site se atualiza em cerca de 1 minuto.
 
 **URL do manifesto:** `https://bfusar2.github.io/app_trimble/manifest.json`
 
+**A cada publicação, aumente o número em `index.html` (`app.js?v=N`).** O GitHub Pages
+manda o navegador guardar os arquivos por 10 minutos; o número novo força o download
+da versão nova. A versão aparece ao lado do título do painel.
+
+## Testes
+
+Com o servidor local rodando, abra no navegador:
+- `test/unitarios.html` — conversão de GUID e medidas em cortes horizontais, verticais e inclinados;
+- `test/alinhamento.html` — alinhamento IFC × visualizador (UTM, milímetros, girado, objetos errados);
+- `test/teste.html` — corte completo do IFC de exemplo.
+
+## Alinhamento
+
+O app só exporta se o erro médio do alinhamento ficar abaixo de 10 cm. Se o alinhamento
+automático não for possível (objetos não encontrados no visualizador), o corte usa as
+coordenadas do próprio IFC e avisa no final para conferir no CAD.
+
 ## Registrar no Trimble Connect
 
 1. Abra o projeto em <https://web.connect.trimble.com> (precisa ser **administrador do projeto**).
