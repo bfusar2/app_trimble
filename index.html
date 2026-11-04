@@ -53,6 +53,8 @@
       <label class="check"><input id="opt-depth-reverse" type="checkbox" /> Inverter sentido da profundidade</label>
       <p id="depth-help" class="hint">Inclui os contornos dos elementos entre o plano da tesoura e a profundidade informada. Inverta o sentido para usar o outro lado. Use 0 para gerar somente a linha de corte.</p>
       <p class="hint">No DXF, as camadas com final _VISTA contêm a projeção em profundidade. As linhas sobrepostas entre elementos são mantidas.</p>
+      <label class="check"><input id="opt-grid" type="checkbox" checked /> Incluir eixos IFC (grid)</label>
+      <label class="check"><input id="opt-hatch" type="checkbox" checked /> Hachurar peças cortadas</label>
       <label class="check"><input id="opt-selected" type="checkbox" /> Só objetos selecionados</label>
       <label class="check"><input id="opt-mirror" type="checkbox" /> Espelhar horizontalmente</label>
       <label class="inline">Unidade do DXF
@@ -74,6 +76,6 @@
   </details>
 
   <!-- Ao publicar uma versão nova, aumente o número abaixo -->
-  <script type="module" src="app.js?v=5"></script>
+  <script type="module" src="app.js?v=6"></script>
 </body>
 </html>

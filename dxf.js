@@ -69,7 +69,12 @@ export function buildDxf(layers, { units = "mm" } = {}) {
     ? 0 : a[0].toUpperCase().endsWith("_VISTA") ? -1 : 1);
   for (const [rawName, lines] of ordered) {
     const layer = safeLayer(rawName);
-    for (const { points, closed } of lines) {
+    for (const { points, closed, text, height } of lines) {
+      if (text) {
+        g(0, "TEXT"); g(8, layer); g(10, num(points[0][0])); g(20, num(points[0][1])); g(30, 0);
+        g(40, num(height)); g(1, String(text).replace(/[\r\n]/g, " "));
+        continue;
+      }
       if (points.length < 2) continue;
       if (points.length === 2 && !closed) {
         g(0, "LINE"); g(8, layer);

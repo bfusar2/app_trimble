@@ -414,9 +414,12 @@ async function generate() {
         progress(`${opts.depth > 0 ? "Gerando corte e vista de" : "Cortando"} ${job.label}…`);
         await nextFrame();
         const plane = makeSectionPlane(planeIfc.point, planeIfc.normal, { mirror: opts.mirror });
-        const { segmentsByType, viewSegmentsByType, elementCount, sectionElementCount, viewElementCount } = cutModel(
-          model, plane, { scale, filterGuids, depth: opts.depth, direction: opts.direction }
+        const { hatchLines, gridLines, segmentsByType, viewSegmentsByType, elementCount, sectionElementCount, viewElementCount } = cutModel(
+          model, plane, { scale, filterGuids, depth: opts.depth, direction: opts.direction, grid: $("opt-grid").checked, hatching: $("opt-hatch").checked }
         );
+        for (const [name, lines] of [["EIXOS", gridLines], ["HACHURA", hatchLines]]) {
+          if (lines.length) layers.set(name, (layers.get(name) || []).concat(lines));
+        }
         total += elementCount;
         sectionTotal += sectionElementCount;
         viewTotal += viewElementCount;
@@ -437,7 +440,7 @@ async function generate() {
       }
     }
 
-    if (!total) {
+    if (!total && !layers.has("EIXOS")) {
       throw new Error(
         opts.depth > 0
           ? "Nenhum contorno encontrado nessa profundidade. Aumente a distância ou inverta o sentido da profundidade."

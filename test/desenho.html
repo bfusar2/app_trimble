@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><title>Testes de eixos e hachura</title></head>
+<body>
+  <h1>Eixos IFC e hachura do corte</h1>
+  <pre id="out">Rodando…</pre>
+  <script type="module">
+    import { openIfc, cutModel } from "../ifc.js";
+    import { hatch } from "../drawing.js";
+    import { makeSectionPlane } from "../section.js";
+    import { buildDxf } from "../dxf.js";
+
+    const results = [];
+    const check = (nome, ok) => results.push({ nome, ok: !!ok });
+    const box = (a, b) => ({ closed: true, points: [[a,a],[b,a],[b,b],[a,b]] });
+    const filled = hatch([box(0,10), box(3,7)], 1);
+    check("Hachura gera traços dentro do contorno fechado", filled.length > 0 && filled.every(
+      ({ points }) => points.every(([x,y]) => x >= 0 && x <= 10 && y >= 0 && y <= 10)));
+    check("Abertura interna permanece sem hachura", filled.every(({ points: [[x,y],[u,v]] }) =>
+      !((x+u)/2 > 3 && (x+u)/2 < 7 && (y+v)/2 > 3 && (y+v)/2 < 7)));
+    check("Contorno aberto não recebe hachura", hatch([{ ...box(0,10), closed: false }], 1).length === 0);
+
+    const fixture = await (await fetch("teste.ifc")).text();
+    const grid = `
+#900=IFCCARTESIANPOINT((0.,0.,0.));
+#901=IFCCARTESIANPOINT((5000.,0.,0.));
+#902=IFCPOLYLINE((#900,#901));
+#903=IFCGRIDAXIS('N1',#902,.T.);
+#904=IFCCARTESIANPOINT((0.,5000.,0.));
+#905=IFCPOLYLINE((#900,#904));
+#906=IFCGRIDAXIS('M1',#905,.T.);
+#907=IFCGRID('0YvctVUKr0kugbFTf53O9Z',$,'Grid',$,$,#20,$,(#903),(#906),$);
+`;
+    const source = fixture.replace(/ENDSEC;\s*END-ISO/, grid + "ENDSEC;\nEND-ISO");
+    const bytes = text => new TextEncoder().encode(text).buffer;
+    const plane = makeSectionPlane([0,0,1.5], [0,0,1]);
+    let model;
+    try {
+      model = await openIfc(bytes(source));
+      const cut = cutModel(model, plane, { grid: true, hatching: true, depth: 2 });
+      check("IfcPolyline exporta dois eixos e seus nomes", cut.gridLines.length === 4 &&
+        cut.gridLines.filter(line => line.text).map(line => line.text).join() === "N1,M1");
+      check("Eixo de 5000 mm preserva a medida", cut.gridLines[0].points[1][0] === 5000);
+      check("Peças cortadas recebem hachura", cut.sectionElementCount === 3 && cut.hatchLines.length > 0);
+      const view = cutModel(model, makeSectionPlane([0,0,4], [0,0,1]), { depth: 2, hatching: true });
+      check("Objetos apenas em vista não recebem hachura", view.viewElementCount === 3 && view.hatchLines.length === 0);
+      const metres = cutModel(model, plane, { grid: true, scale: 1 });
+      check("Eixos respeitam saída em metros", metres.gridLines[0].points[1][0] === 5);
+      const mirrored = cutModel(model, makeSectionPlane([0,0,1.5], [0,0,1], { mirror: true }), { grid: true });
+      check("Eixos acompanham espelhamento do corte", mirrored.gridLines[0].points[1][0] === -5000);
+      const dxf = buildDxf(new Map([["EIXOS",cut.gridLines],["HACHURA",cut.hatchLines]]));
+      check("DXF inclui texto, eixos e hachura com coordenadas finitas", dxf.includes("\r\nTEXT\r\n") &&
+        dxf.includes("\r\nN1\r\n") && dxf.includes("\r\nHACHURA\r\n") && !/NaN|Infinity/.test(dxf));
+      model.close(); model = null;
+
+      const indexed = source.replace("#902=IFCPOLYLINE((#900,#901));",
+        "#910=IFCCARTESIANPOINTLIST2D(((0.,0.),(5000.,0.)));\n#902=IFCINDEXEDPOLYCURVE(#910,(IFCLINEINDEX((1,2))),.F.);");
+      model = await openIfc(bytes(indexed));
+      const axes = cutModel(model, plane, { grid: true }).gridLines;
+      check("IfcLineIndex real do web-ifc preserva o eixo IFC4", axes.length === 4 && axes[0].points[1][0] === 5000);
+    } catch (err) {
+      check(String(err.stack || err), false);
+    } finally { model?.close(); }
+    window.__result = { total: results.length, falhas: results.filter(result => !result.ok) };
+    document.getElementById("out").textContent = JSON.stringify(window.__result, null, 2);
+  </script>
+</body>
+</html>

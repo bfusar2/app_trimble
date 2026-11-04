@@ -3,8 +3,8 @@
 // Aqui tudo é convertido para o padrão IFC/Trimble: metros, eixo Z para cima.
 
 const V = new URL(import.meta.url).search;
-const [{ sliceMesh }, { canonGuid }, { projectMeshDepth }] = await Promise.all([
-  import(`./section.js${V}`), import(`./guid.js${V}`), import(`./depth.js${V}`),
+const [{ sliceMesh, chainSegments }, { canonGuid }, { projectMeshDepth }, { hatch, gridLines }] = await Promise.all([
+  import(`./section.js${V}`), import(`./guid.js${V}`), import(`./depth.js${V}`), import(`./drawing.js${V}`),
 ]);
 
 const WEB_IFC_VERSION = "0.0.66";
@@ -126,18 +126,23 @@ export function sampleBoxes(model, limit = 40) {
  * depth em metros; direction = -1 ou 1 indica o lado da normal do plano.
  * filterGuids: Set opcional de GUIDs na forma canônica (canonGuid) — corta só esses elementos.
  */
-export function cutModel(model, plane, { scale = 1000, filterGuids = null, depth = 0, direction = -1 } = {}) {
+export function cutModel(model, plane, { scale = 1000, filterGuids = null, depth = 0, direction = -1, grid = false, hatching = false } = {}) {
   if (!Number.isFinite(depth) || depth < 0) throw new Error("Informe uma profundidade válida, maior ou igual a zero.");
   if (direction !== -1 && direction !== 1) throw new Error("Sentido da profundidade inválido.");
   const result = new Map();
-  const views = new Map();
+  const views = new Map(), pieces = new Map();
   const elements = new Set(), sectionElements = new Set(), viewElements = new Set();
   forEachMesh(model, ({ expressID, type, positions, index }) => {
     if (filterGuids && !filterGuids.has(canonGuid(model.guidOf(expressID)))) return;
     if (!result.has(type)) result.set(type, []);
+    const start = result.get(type).length;
     if (sliceMesh(positions, index, plane, scale, result.get(type)) > 0) {
       elements.add(expressID);
       sectionElements.add(expressID);
+      if (hatching) {
+        if (!pieces.has(expressID)) pieces.set(expressID, []);
+        for (let i=start; i<result.get(type).length; i++) pieces.get(expressID).push(result.get(type)[i]);
+      }
     }
     if (depth > 0) {
       if (!views.has(type)) views.set(type, []);
@@ -150,6 +155,8 @@ export function cutModel(model, plane, { scale = 1000, filterGuids = null, depth
   for (const [k, v] of result) if (!v.length) result.delete(k);
   for (const [k, v] of views) if (!v.length) views.delete(k);
   return {
+    gridLines: grid ? gridLines(model, plane, scale, filterGuids && (id => filterGuids.has(canonGuid(model.guidOf(id))))) : [],
+    hatchLines: [...pieces.values()].flatMap(segs => hatch(chainSegments(segs, .0005*scale), .1*scale)),
     segmentsByType: result, viewSegmentsByType: views, elementCount: elements.size,
     sectionElementCount: sectionElements.size, viewElementCount: viewElements.size,
   };
