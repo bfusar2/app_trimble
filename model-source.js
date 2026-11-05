@@ -1,7 +1,25 @@
 // Mantém apenas os bytes do IFC em cache. A geometria e a memória WASM são
 // liberadas pelo leitor após cada modelo, independentemente deste cache.
-export function createModelSource({ getLoadedModel, download, onStatus = () => {}, maxBytes = 64 * 1024 * 1024, loadedModelTimeoutMs = 5000 }) {
+export const MAX_IFC_BYTES = 1024 * 1024 * 1024;
+
+export function assertIfcSize(size, maxFileBytes = MAX_IFC_BYTES) {
+  if (!hasSize(size) || Number(size) <= maxFileBytes) return;
+  const mb = bytes => (bytes / (1024 * 1024)).toFixed(1).replace(".", ",");
+  const error = new Error(`IFC muito pesado (${mb(Number(size))} MB). O limite por arquivo é ${mb(maxFileBytes)} MB.`);
+  error.code = "IFC_TOO_LARGE";
+  error.size = Number(size);
+  error.maxFileBytes = maxFileBytes;
+  throw error;
+}
+
+const hasSize = size => size != null && Number.isFinite(Number(size)) && Number(size) >= 0;
+const matchesModel = (loaded, model) => loaded &&
+  (loaded.id == null || String(loaded.id) === String(model.id)) &&
+  (!model.versionId || loaded.versionId == null || String(loaded.versionId) === String(model.versionId));
+
+export function createModelSource({ getLoadedModel, getMetadata, download, onStatus = () => {}, maxBytes = 64 * 1024 * 1024, maxFileBytes = MAX_IFC_BYTES, loadedModelTimeoutMs = 5000 }) {
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) throw new Error("Limite de cache inválido.");
+  if (!Number.isSafeInteger(maxFileBytes) || maxFileBytes <= 0) throw new Error("Limite de arquivo inválido.");
   if (!Number.isSafeInteger(loadedModelTimeoutMs) || loadedModelTimeoutMs <= 0) throw new Error("Tempo de espera do host inválido.");
   const cache = new Map();
   let totalBytes = 0;
@@ -30,6 +48,7 @@ export function createModelSource({ getLoadedModel, download, onStatus = () => {
       const key = keyOf(model, projectId);
       if (key && cache.has(key)) {
         const blob = cache.get(key);
+        assertIfcSize(blob.size, maxFileBytes);
         cache.delete(key);
         cache.set(key, blob);
         onStatus("cache", model);
@@ -37,17 +56,31 @@ export function createModelSource({ getLoadedModel, download, onStatus = () => {
         return { buffer, source: "cache" };
       }
 
+      assertIfcSize(model.size, maxFileBytes);
+      if (!hasSize(model.size) && getMetadata) {
+        try {
+          const metadata = await waitFor(getMetadata(model, signal), signal, loadedModelTimeoutMs);
+          if (matchesModel(metadata, model)) assertIfcSize(metadata.size, maxFileBytes);
+        } catch (error) {
+          signal?.throwIfAborted();
+          if (error?.code === "IFC_TOO_LARGE") throw error;
+          // Metadados opcionais podem não estar disponíveis para esta revisão.
+          // O tamanho ainda será validado no conteúdo do host ou no download.
+        }
+      }
+
       if (getLoadedModel) {
         onStatus("trimble", model);
         let blob = null;
         try {
           const loaded = await waitFor(getLoadedModel(model.id), signal, loadedModelTimeoutMs);
-          const sameId = loaded?.id == null || String(loaded.id) === String(model.id);
-          const sameVersion = !model.versionId || loaded?.versionId == null ||
-            String(loaded.versionId) === String(model.versionId);
-          if (sameId && sameVersion) blob = await waitFor(originalIfc(loaded?.blob), signal);
-        } catch {
+          if (matchesModel(loaded, model)) {
+            assertIfcSize(loaded.file?.size, maxFileBytes);
+            blob = await waitFor(originalIfc(loaded.blob, maxFileBytes), signal);
+          }
+        } catch (error) {
           signal?.throwIfAborted();
+          if (error?.code === "IFC_TOO_LARGE") throw error;
           // O host pode não fornecer o conteúdo carregado. Usa o IFC original
           // pela API de arquivos quando o blob está ausente ou indisponível.
         }
@@ -61,6 +94,7 @@ export function createModelSource({ getLoadedModel, download, onStatus = () => {
       onStatus("download", model);
       signal?.throwIfAborted();
       const buffer = await waitFor(download(model, signal), signal);
+      assertIfcSize(buffer?.byteLength, maxFileBytes);
       const header = buffer instanceof ArrayBuffer ? new Blob([new Uint8Array(buffer, 0, Math.min(256, buffer.byteLength))]) : null;
       if (!header || !await waitFor(isIfc(header), signal)) {
         throw new Error(`O conteúdo recebido de "${model.name || model.id}" não é um IFC STEP válido. Confira o arquivo e tente novamente.`);
@@ -110,12 +144,15 @@ function waitFor(promise, signal, timeoutMs = 0) {
   });
 }
 
-async function originalIfc(content) {
+async function originalIfc(content, maxFileBytes) {
   let blob;
   if (typeof content === "string") {
     // O Workspace API também pode devolver base64. URLs, data URLs e texto
     // simples não são tratados como links e não provocam requisições adicionais.
     const binary = atob(content);
+    const header = new TextDecoder().decode(Uint8Array.from(binary.slice(0, 256), char => char.charCodeAt(0)));
+    if (!/^\s*ISO-10303-21\s*;/i.test(header)) return null;
+    assertIfcSize(binary.length, maxFileBytes);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
     blob = new Blob([bytes]);
@@ -123,7 +160,9 @@ async function originalIfc(content) {
     typeof content.arrayBuffer === "function" && typeof content.slice === "function" &&
     Number.isSafeInteger(content.size) && content.size >= 0) blob = content;
   else return null;
-  return await isIfc(blob) ? blob : null;
+  if (!await isIfc(blob)) return null;
+  assertIfcSize(blob.size, maxFileBytes);
+  return blob;
 }
 
 async function isIfc(blob) {

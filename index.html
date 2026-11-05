@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Corte DXF – Interalli</title>
   <link rel="icon" href="icon.svg" />
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=8" />
   <!-- Workspace API oficial da Trimble (ponte entre o iframe e o Trimble Connect) -->
   <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
 </head>
@@ -69,17 +69,22 @@
     <button id="btn-generate" class="primary">Gerar DXF</button>
     <button id="btn-cancel" class="secondary" hidden>Cancelar geração</button>
     <button id="btn-clear-cache" class="secondary small">Limpar cache de IFCs</button>
-    <p class="hint">Cache da sessão de até 64 MB. Arquivos são processados um por vez.</p>
+    <p class="hint">Cache da sessão de até 64 MB. Arquivos são processados um por vez. IFCs acima de 1 GB ou com falha são ignorados; o DXF é gerado com os demais.</p>
     <p id="progress" class="hint" role="status" aria-live="polite"></p>
     <p id="download"></p>
+    <div id="warnings" class="hint" aria-live="polite" hidden>
+      <strong>IFCs ignorados no DXF</strong>
+      <ul id="skipped-files"></ul>
+    </div>
   </main>
 
   <details id="log-box">
     <summary>Log</summary>
+    <button id="btn-download-log" class="secondary small">Baixar Log</button>
     <pre id="log"></pre>
   </details>
 
   <!-- Ao publicar uma versão nova, aumente o número abaixo -->
-  <script type="module" src="app.js?v=7"></script>
+  <script type="module" src="app.js?v=8"></script>
 </body>
 </html>

@@ -97,4 +97,5 @@ button:disabled { opacity: .5; cursor: wait; }
 a.download { font-weight: 600; color: var(--accent); }
 
 #log-box { margin-top: 24px; color: var(--muted); }
+#warnings { border-left: 3px solid var(--warn); background: #fff8e6; padding: 8px 12px; color: var(--fg); }
 #log { font-size: 11px; max-height: 200px; overflow: auto; white-space: pre-wrap; }

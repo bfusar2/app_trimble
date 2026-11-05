@@ -22,6 +22,7 @@ export function createIfcSession() {
     if (data.error) {
       const error = new Error(data.error.message);
       error.stack = data.error.stack;
+      error.ifcContext = data.error.ifcContext;
       error.readerFailure = true;
       task.reject(error);
     } else task.resolve(data.result);

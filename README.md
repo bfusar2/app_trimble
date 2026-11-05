@@ -20,7 +20,12 @@ O cache da sessão guarda até 64 MB de IFCs por projeto, modelo e revisão. Arq
 maiores são processados sem permanecer no cache. **Limpar cache de IFCs** libera
 esses bytes. **Cancelar geração** interrompe o download ou o leitor em execução.
 Com **Só objetos selecionados**, os modelos sem seleção são dispensados antes
-da leitura. Falhas mostram o arquivo e a etapa, com o Log aberto automaticamente.
+da leitura. IFCs acima de 1 GiB são ignorados, preferencialmente pela consulta de
+metadados antes do download. Falhas de um arquivo também permitem continuar com
+os demais: o download é identificado como `corte_parcial_...dxf` e o painel lista
+os IFCs omitidos. Se nenhum arquivo funcionar, não há DXF para baixar. O botão
+**Baixar Log** salva os detalhes completos, incluindo a etapa e, quando disponível,
+o elemento IFC que interrompeu a leitura.
 
 ### Por que DXF e não DWG?
 DWG é um formato fechado da Autodesk e não existe gerador gratuito que rode no navegador.

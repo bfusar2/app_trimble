@@ -8,7 +8,7 @@
 const V = new URL(import.meta.url).search;
 const [
   { createIfcSession },
-  { createModelSource },
+  { createModelSource, assertIfcSize },
   { makeSectionPlane },
   { buildDxfBlob },
   { fitAlignment },
@@ -36,9 +36,11 @@ let planes = [];
 let models = [];
 let generation = null;
 let downloadUrl = null;
+let logDownloadUrl = null;
 const modelChoices = new Map();
 const source = createModelSource({
   getLoadedModel: id => API.viewer.getLoadedModel(id),
+  getMetadata: getModelMetadata,
   download: downloadModel,
   onStatus: (origin, model) => {
     const action = { cache: "Reutilizando IFC em cache", trimble: "Consultando IFC carregado no Trimble", download: "Baixando IFC" }[origin];
@@ -82,6 +84,15 @@ async function init() {
   $("btn-clear-cache").onclick = () => { source.clear(); progress("Cache de IFCs limpo."); };
   $("btn-models-all").onclick = () => selectModels(true);
   $("btn-models-none").onclick = () => selectModels(false);
+  $("btn-download-log").onclick = () => {
+    if (logDownloadUrl) URL.revokeObjectURL(logDownloadUrl);
+    const text = `Corte DXF ${V}\n${new Date().toISOString()}\n\n${$("log").textContent}`;
+    logDownloadUrl = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = logDownloadUrl;
+    link.download = "corte-dxf-log.txt";
+    link.click();
+  };
 
   if (!EMBEDDED) {
     setStatus("Modo local", "warn");
@@ -306,7 +317,16 @@ async function downloadModel(model, signal) {
 
   const res = await fetch(url, { signal });
   if (!res.ok) throw new Error(`Falha no download do IFC (${res.status}). Use 'Carregar IFC do computador'.`);
+  try { assertIfcSize(Number(res.headers.get("Content-Length"))); }
+  catch (error) { await res.body?.cancel(); throw error; }
   return res.arrayBuffer();
+}
+
+async function getModelMetadata(model, signal) {
+  const version = model.versionId ? `?versionId=${encodeURIComponent(model.versionId)}` : "";
+  const response = await authedFetch(`${apiBase()}files/${encodeURIComponent(model.id)}${version}`, signal);
+  if (!response.ok) throw new Error(`Metadados do IFC indisponíveis (${response.status}).`);
+  return response.json();
 }
 
 // ---------------- alinhamento IFC <-> visualizador ----------------
@@ -391,6 +411,8 @@ async function generate() {
   $("btn-cancel").hidden = false;
   $("btn-cancel").disabled = false;
   $("download").innerHTML = "";
+  $("skipped-files").replaceChildren();
+  $("warnings").hidden = true;
   if (downloadUrl) { URL.revokeObjectURL(downloadUrl); downloadUrl = null; }
   let currentFile = "", stage = "opções";
   try {
@@ -416,9 +438,14 @@ async function generate() {
       point: ["px", "py", "pz"].map(id => Number($(id).value) / 1000),
       normal: ["nx", "ny", "nz"].map(id => Number($(id).value)),
     };
+    const initialPlane = EMBEDDED ? planeToIfc(tcPlane, null) : manualPlane;
+    makeSectionPlane(initialPlane.point, initialPlane.normal);
     const checked = [...document.querySelectorAll('#models input[type="checkbox"]:checked')].map(c => models[Number(c.value)]);
     const jobs = file
-      ? [{ label: file.name, modelId: checked[0]?.id, getBuffer: async () => ({ buffer: await file.arrayBuffer(), source: "local" }) }]
+      ? [{ label: file.name, modelId: checked[0]?.id, getBuffer: async () => {
+          assertIfcSize(file.size);
+          return { buffer: await file.arrayBuffer(), source: "local" };
+        } }]
       : checked.map(m => ({ label: m.name, modelId: m.id, getBuffer: () => source.get(m, project?.id, { signal }) }));
     if (!jobs.length) throw new Error(EMBEDDED ? "Marque ao menos um modelo IFC." : "Escolha um arquivo .ifc.");
 
@@ -431,27 +458,36 @@ async function generate() {
         const entry = selection?.find(item => item.modelId === job.modelId);
         if (!entry?.objectRuntimeIds?.length) { jobs.splice(i, 1); continue; }
         currentFile = job.label;
-        const ids = await withAbort(API.viewer.convertToObjectIds(job.modelId, entry.objectRuntimeIds), signal);
-        job.filterGuids = new Set((ids || []).map(canonGuid).filter(Boolean));
-        if (!job.filterGuids.size) throw new Error("Não consegui identificar os objetos selecionados neste modelo.");
+        try {
+          const ids = await withAbort(API.viewer.convertToObjectIds(job.modelId, entry.objectRuntimeIds), signal);
+          job.filterGuids = new Set((ids || []).map(canonGuid).filter(Boolean));
+          if (!job.filterGuids.size) throw new Error("Não consegui identificar os objetos selecionados neste modelo.");
+        } catch (error) {
+          if (signal.aborted) throw error;
+          job.selectionError = error;
+        }
       }
       if (!jobs.length) throw new Error("Nenhum objeto selecionado nos modelos IFC marcados.");
     }
     log("Lote", { arquivos: jobs.length });
     const layers = new Map();
+    const skipped = [];
+    let completed = 0;
     let total = 0, sectionTotal = 0, viewTotal = 0, unverified = false;
     for (const [index, job] of jobs.entries()) {
       signal.throwIfAborted();
       currentFile = job.label;
-      stage = "obtenção do IFC";
-      progress(`[${index + 1}/${jobs.length}] Obtendo ${job.label}…`);
-      let { buffer, source: origin } = await withAbort(job.getBuffer(), signal);
-      signal.throwIfAborted();
-      log("Origem do IFC", { arquivo: job.label, origem: origin, MB: +(buffer.byteLength / 1e6).toFixed(1) });
-      stage = "leitura do IFC";
-      progress(`[${index + 1}/${jobs.length}] Lendo ${job.label} (${(buffer.byteLength / 1e6).toFixed(1)} MB)…`);
-      run.session = createIfcSession();
+      stage = job.selectionError ? "seleção de objetos" : "obtenção do IFC";
+      let result;
       try {
+        if (job.selectionError) throw job.selectionError;
+        progress(`[${index + 1}/${jobs.length}] Obtendo ${job.label}…`);
+        let { buffer, source: origin } = await withAbort(job.getBuffer(), signal);
+        signal.throwIfAborted();
+        log("Origem do IFC", { arquivo: job.label, origem: origin, MB: +(buffer.byteLength / 1e6).toFixed(1) });
+        stage = "leitura do IFC";
+        progress(`[${index + 1}/${jobs.length}] Lendo ${job.label} (${(buffer.byteLength / 1e6).toFixed(1)} MB)…`);
+        run.session = createIfcSession();
         await run.session.open(buffer);
         buffer = null; // o ArrayBuffer foi transferido para o worker
         stage = "alinhamento";
@@ -478,23 +514,40 @@ async function generate() {
         stage = "corte e projeção";
         progress(`[${index + 1}/${jobs.length}] Gerando corte de ${job.label}…`);
         const plane = makeSectionPlane(planeIfc.point, planeIfc.normal, { mirror: opts.mirror });
-        const result = await run.session.cut(plane, { ...opts, scale, filterGuids: job.filterGuids || null });
-        for (const [name, lines] of result.layers) {
-          if (!layers.has(name)) layers.set(name, []);
-          const target = layers.get(name);
-          for (const line of lines) target.push(line);
-          log(`Camada ${name}: ${lines.length} linhas`);
-        }
-        total += result.elementCount;
-        sectionTotal += result.sectionElementCount;
-        viewTotal += result.viewElementCount;
+        result = await run.session.cut(plane, { ...opts, scale, filterGuids: job.filterGuids || null });
+      } catch (err) {
+        if (signal.aborted) throw err;
+        const reason = /aborted|memory|out of bounds|unreachable|WebAssembly/i.test(err?.message || "")
+          ? "IFC muito pesado ou incompatível com o leitor." : (err?.message || String(err));
+        skipped.push(job.label);
+        const item = document.createElement("li");
+        item.textContent = `${job.label} — ${reason}`;
+        $("skipped-files").append(item);
+        $("warnings").hidden = false;
+        $("log-box").open = true;
+        log("IFC ignorado", { arquivo: job.label, etapa: stage, motivo: reason,
+          mensagem: err?.message || String(err), elemento: err.ifcContext, stack: err.stack });
+        continue;
       } finally {
-        run.session.close();
+        run.session?.close();
         run.session = null;
       }
+      // Só incorpora um modelo depois que todo o trabalho do leitor terminou.
+      stage = "agregação do desenho";
+      for (const [name, lines] of result.layers) {
+        if (!layers.has(name)) layers.set(name, []);
+        const target = layers.get(name);
+        for (const line of lines) target.push(line);
+        log(`Camada ${name}: ${lines.length} linhas`);
+      }
+      total += result.elementCount;
+      sectionTotal += result.sectionElementCount;
+      viewTotal += result.viewElementCount;
+      completed++;
     }
     currentFile = "";
     stage = "gravação do DXF";
+    if (!completed) throw new Error("Nenhum IFC pôde ser processado. Confira os arquivos ignorados abaixo.");
     if (!total && !layers.has("EIXOS")) {
       throw new Error(opts.depth > 0
         ? "Nenhum contorno encontrado nessa profundidade. Aumente a distância ou inverta o sentido da profundidade."
@@ -506,18 +559,22 @@ async function generate() {
     const layerCount = layers.size;
     const dxf = buildDxfBlob(layers, { units: opts.units });
     layers.clear();
-    const name = `corte_${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "")}.dxf`;
+    const name = `corte_${skipped.length ? 'parcial_' : ''}${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "")}.dxf`;
     offerDownload(dxf, name);
-    progress(`Pronto: ${jobs.length} arquivo(s), ${total} elemento(s), ${sectionTotal} no plano, ${viewTotal} em vista, ${layerCount} camada(s).` +
+    progress(`Pronto: ${completed} arquivo(s), ${total} elemento(s), ${sectionTotal} no plano, ${viewTotal} em vista, ${layerCount} camada(s).` +
+      (skipped.length ? ` DXF parcial: ${skipped.length} IFC(s) ignorado(s), listados abaixo.` : "") +
       (unverified ? " Atenção: alinhamento não verificado, confira as coordenadas no CAD." : ""));
   } catch (err) {
     if (signal.aborted) { progress("Geração cancelada."); return; }
     const detail = err?.message || String(err);
-    log("Detalhes da falha", { arquivo: currentFile, etapa: stage, mensagem: detail, stack: err.stack });
+    log("Detalhes da falha", { arquivo: currentFile, etapa: stage, mensagem: detail,
+      elemento: err.ifcContext, stack: err.stack });
     const explanation = /aborted|memory|out of bounds|unreachable/i.test(detail)
       ? "O leitor IFC foi interrompido. Pode ser limite de memória ou uma geometria incompatível. Tente este arquivo isoladamente."
       : detail;
-    throw new Error(`${currentFile ? 'Arquivo “' + currentFile + '” — ' : ''}${stage}: ${explanation}`);
+    const element = err.ifcContext
+      ? ` Elemento #${err.ifcContext.expressID}${err.ifcContext.type ? ' (' + err.ifcContext.type + ')' : ''}.` : "";
+    throw new Error(`${currentFile ? 'Arquivo “' + currentFile + '” — ' : ''}${stage}: ${explanation}${element} Use “Baixar Log” para obter os detalhes completos.`);
   } finally {
     run.session?.close();
     controls.forEach((control, index) => { control.disabled = disabled[index]; });

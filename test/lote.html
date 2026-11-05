@@ -7,7 +7,7 @@ const check = (nome, ok) => { results.push({nome,ok:!!ok}); show(); };
 function show() { document.getElementById('out').textContent = results.map(r => `${r.ok ? 'OK' : 'FALHA'} — ${r.nome}`).join('\n'); }
 const fixture = await (await fetch('teste.ifc')).text();
 const original = new Blob([fixture]);
-let hostCalls=0, downloads=0, selection=false, block=false, broken=false;
+let hostCalls=0, downloads=0, selection=false, block=false, broken=false, heavy=false, metadataCalls=0;
 let release;
 const models=['a','b','c'].map(id=>({id,name:id+'.ifc',versionId:'1'}));
 window.fakeAPI={
@@ -19,25 +19,27 @@ window.fakeAPI={
   getLoadedModel:async id=>{
    hostCalls++;
    if(block) await new Promise(resolve=>{release=resolve;});
-   return {id,versionId:'1',blob:broken?new Blob(['ISO-10303-21; INVALID']):id==='c'?new Blob(['TRB']):original};
+   const invalid = broken===true || (broken==='one' && id==='b');
+   return {id,versionId:'1',blob:invalid?new Blob(['ISO-10303-21; INVALID']):id==='c'?new Blob(['TRB']):original};
   },
   convertToObjectRuntimeIds:async(id,guids)=>guids.map((_,i)=>i+1),
   getObjectBoundingBoxes:async()=>[],
-  getSelection:async()=>selection?[{modelId:'b',objectRuntimeIds:[66]}]:[],
-  convertToObjectIds:async()=>['0BTBFw6f90Nfh9rP1dlXr2'],
+  getSelection:async()=>selection==='multiple'?models.map(m=>({modelId:m.id,objectRuntimeIds:[66]})):selection?[{modelId:'b',objectRuntimeIds:[66]}]:[],
+  convertToObjectIds:async id=>{if(selection==='multiple'&&id==='b')throw Error('Seleção indisponível neste modelo');return ['0BTBFw6f90Nfh9rP1dlXr2'];},
  }
 };
 window.fakeDownload=()=>{downloads++;return new Response(JSON.stringify({url:new URL('teste.ifc',location.href).href}),{headers:{'Content-Type':'application/json'}});};
+window.fakeMetadata=url=>{metadataCalls++; const id=new URL(url).pathname.split('/').pop(); return new Response(JSON.stringify({id,versionId:'1',size:heavy&&id==='b'?1113119703:original.size}),{headers:{'Content-Type':'application/json'}});};
 const html=await (await fetch('../index.html')).text();
 const stub=`<base href="${new URL('../',location.href)}"><script>
 window.TrimbleConnectWorkspace={connect:async(parent,onEvent)=>{window.testEvent=onEvent;return parent.fakeAPI;}};
 const originalFetch=window.fetch.bind(window);
-window.fetch=(url,options)=>String(url).includes('/downloadurl')?Promise.resolve(parent.fakeDownload()):originalFetch(url,options);
-HTMLAnchorElement.prototype.click=function(){};
+window.fetch=(url,options)=>String(url).includes('/downloadurl')?Promise.resolve(parent.fakeDownload()):String(url).includes('/tc/api/2.0/files/')?Promise.resolve(parent.fakeMetadata(url)):originalFetch(url,options);
+HTMLAnchorElement.prototype.click=function(){window.lastDownload={name:this.download,url:this.href};};
 <\/script>`;
 const frame=document.getElementById('app');
 frame.srcdoc=html.replace(/<script src="https:\/\/components[^>]+><\/script>/,stub);
-const until=async(test)=>{for(let i=0;i<400;i++){if(test())return;await new Promise(r=>setTimeout(r,50));}throw Error('Tempo de espera esgotado');};
+const until=async(test)=>{for(let i=0;i<1200;i++){if(test())return;await new Promise(r=>setTimeout(r,50));}throw Error('Tempo de espera esgotado');};
 let doc;
 try {
  await until(()=>frame.contentDocument?.getElementById('models')?.querySelectorAll('input').length===3);
@@ -75,10 +77,31 @@ try {
  broken=true;
  await run();
  await until(()=>doc.getElementById('progress').textContent.startsWith('Erro:'));
- check('Erro identifica arquivo, etapa e abre o Log',doc.getElementById('progress').textContent.includes('a.ifc')&&doc.getElementById('progress').textContent.includes('leitura do IFC')&&doc.getElementById('log-box').open);
+ check('Lote totalmente inválido não gera DXF e lista cada arquivo',!doc.getElementById('download').querySelector('a')&&doc.getElementById('skipped-files').children.length===3);
+ check('Erro por arquivo identifica a etapa e abre o Log',doc.getElementById('log').textContent.includes('a.ifc')&&doc.getElementById('log').textContent.includes('leitura do IFC')&&doc.getElementById('log-box').open);
  broken=false;doc.getElementById('btn-clear-cache').click();
  await run();
  check('Nova tentativa após falha usa leitor novo e conclui',doc.getElementById('progress').textContent.includes('Pronto: 3 arquivo(s)'));
+ broken='one';doc.getElementById('btn-clear-cache').click();
+ await run();
+ const partial=doc.getElementById('download').querySelector('a');
+ check('Arquivo inválido no meio do lote mantém os dois arquivos bons no DXF',doc.getElementById('progress').textContent.includes('Pronto: 2 arquivo(s), 8 elemento(s)')&&partial?.download.includes('parcial_'));
+ check('Aviso identifica somente o IFC omitido',doc.getElementById('skipped-files').children.length===1&&doc.getElementById('skipped-files').textContent.includes('b.ifc'));
+ broken=false;heavy=true;doc.getElementById('btn-clear-cache').click();
+ const hostsBeforeHeavy=hostCalls;
+ await run();
+ check('IFC de 1,11 GB é ignorado pelos metadados antes de obter seu conteúdo',hostCalls===hostsBeforeHeavy+2&&doc.getElementById('skipped-files').textContent.includes('IFC muito pesado'));
+ check('IFC pesado não impede o download do DXF dos demais modelos',doc.getElementById('progress').textContent.includes('Pronto: 2 arquivo(s)')&&doc.getElementById('download').querySelector('a')?.download.includes('parcial_'));
+ doc.getElementById('btn-download-log').click();
+ const saved=frame.contentWindow.lastDownload;
+ const logText=await (await fetch(saved.url)).text();
+ check('Baixar Log preserva os detalhes completos em texto',saved.name==='corte-dxf-log.txt'&&logText.includes('IFC ignorado')&&logText.includes('b.ifc'));
+ heavy=false;doc.getElementById('btn-clear-cache').click();
+ await run();
+ check('Nova geração limpa avisos anteriores quando todos funcionam',doc.getElementById('warnings').hidden&&doc.getElementById('progress').textContent.includes('Pronto: 3 arquivo(s)')&&!doc.getElementById('download').querySelector('a').download.includes('parcial_'));
+ selection='multiple';doc.getElementById('opt-selected').click();
+ await run();
+ check('Falha de seleção de um modelo permite gerar o DXF dos outros selecionados',doc.getElementById('progress').textContent.includes('Pronto: 2 arquivo(s), 2 elemento(s)')&&doc.getElementById('skipped-files').textContent.includes('b.ifc'));
 } catch(error) {check(error.stack||String(error),false);}
 window.__result={total:results.length,falhas:results.filter(r=>!r.ok)};show();
 </script></body></html>

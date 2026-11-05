@@ -11,7 +11,7 @@ const WEB_IFC_VERSION = "0.0.66";
 const WEB_IFC_URL = `https://cdn.jsdelivr.net/npm/web-ifc@${WEB_IFC_VERSION}/`;
 
 // Elementos que não devem aparecer no corte
-const SKIP_TYPES = new Set(["IFCSPACE", "IFCOPENINGELEMENT", "IFCANNOTATION", "IFCVIRTUALELEMENT"]);
+const SKIP_TYPES = new Set(["IFCSPACE", "IFCOPENINGELEMENT", "IFCOPENINGSTANDARDCASE", "IFCANNOTATION", "IFCVIRTUALELEMENT"]);
 
 /** Abre um IFC (ArrayBuffer). Retorna um "modelo" para usar nas outras funções. */
 export async function openIfc(buffer) {
@@ -130,30 +130,40 @@ export function sampleBoxes(model, limit = 40) {
   if (!Number.isInteger(limit) || limit <= 0) return [];
   const boxes = new Map(); // expressID -> {min,max}
   const candidates = model.productIds();
-  // Consulta os IDs sem triangular todo o modelo. Só gera geometria das
-  // próximas amostras até haver caixas suficientes para o alinhamento.
-  for (let start = 0; start < candidates.length && boxes.size < limit;) {
-    const batch = [];
-    while (start < candidates.length && batch.length < limit - boxes.size) {
-      const id = candidates[start++];
-      if (!SKIP_TYPES.has(model.typeOf(id)) && model.guidOf(id)) batch.push(id);
-    }
-    forEachMesh(model, ({ expressID, positions }) => {
-      if (!positions.length) return;
-      if (!boxes.has(expressID)) {
-        if (boxes.size >= limit) return;
-        boxes.set(expressID, { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] });
-      }
-      const b = boxes.get(expressID);
-      for (let i = 0; i < positions.length; i += 3)
-        for (let a = 0; a < 3; a++) {
-          const v = positions[i + a];
-          if (v < b.min[a]) b.min[a] = v;
-          if (v > b.max[a]) b.max[a] = v;
+  const guids = new Map();
+  // Não triangula candidatos sem representação própria para obter amostras.
+  // Cada chamada recebe um único ID: uma falha WASM identifica a peça exata.
+  for (const id of candidates) {
+    if (boxes.size >= limit) break;
+    const context = { expressID: id, type: null, guid: null };
+    try {
+      const code = model.api.GetLineType(model.modelID, id);
+      context.type = model.typeOf(id);
+      if (!model.api.IsIfcElement(code) || SKIP_TYPES.has(context.type)) continue;
+      const line = model.api.GetLine(model.modelID, id);
+      context.guid = line?.GlobalId?.value || null;
+      if (!context.guid || !line?.Representation?.value) continue;
+      guids.set(id, context.guid);
+      forEachMesh(model, ({ expressID, positions }) => {
+        if (!positions.length) return;
+        if (!boxes.has(expressID)) {
+          boxes.set(expressID, { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] });
         }
-    }, batch);
+        const b = boxes.get(expressID);
+        for (let i = 0; i < positions.length; i += 3)
+          for (let a = 0; a < 3; a++) {
+            const v = positions[i + a];
+            if (v < b.min[a]) b.min[a] = v;
+            if (v > b.max[a]) b.max[a] = v;
+          }
+      }, [id]);
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      error.ifcContext = context;
+      throw error;
+    }
   }
-  return [...boxes].map(([expressID, b]) => ({ guid: model.guidOf(expressID), ...b })).filter((b) => b.guid);
+  return [...boxes].map(([expressID, b]) => ({ guid: guids.get(expressID), ...b }));
 }
 
 /**

@@ -32,6 +32,43 @@
       const samples = sampleBoxes(model, 2);
       check("Duas amostras leem só duas geometrias, sem percorrer todo o modelo", samples.length === 2 && reads === 2);
       check("Geometrias das amostras são liberadas", reads === releases);
+      const streams = [];
+      const streamMeshes = model.api.StreamMeshes.bind(model.api);
+      model.api.StreamMeshes = (modelID, ids, callback) => {
+        streams.push([...ids]);
+        return streamMeshes(modelID, ids, callback);
+      };
+      sampleBoxes(model, 2);
+      check("Amostras são trianguladas individualmente, preservando o ID da chamada", streams.length === 2 && streams.every(ids => ids.length === 1));
+      model.api.StreamMeshes = streamMeshes;
+
+      let attempted = 0;
+      const names = ["IFCBUILDING", "IFCELEMENTASSEMBLY", "IFCOPENINGSTANDARDCASE", "IFCUNKNOWN"];
+      const mock = {
+        modelID: 0,
+        productIds: () => [0,1,2,3],
+        typeOf: id => names[id],
+        api: {
+          GetLineType: (_, id) => id,
+          IsIfcElement: code => code !== 3,
+          GetLine: (_, id) => ({ GlobalId: { value: `guid-${id}` }, Representation: id < 2 ? null : { value: 10 } }),
+          StreamMeshes: () => { attempted++; },
+        },
+      };
+      check("Amostragem dispensa spatial/assembly sem representação, aberturas e tipos fora do leitor", sampleBoxes(mock, 40).length === 0 && attempted === 0);
+      const failure = new WebAssembly.RuntimeError("Aborted");
+      const failing = {
+        ...mock, productIds: () => [36], typeOf: () => "IFCWALL",
+        api: {
+          ...mock.api, GetLineType: () => 1,
+          GetLine: () => ({ GlobalId: { value: "wall-guid" }, Representation: { value: 10 } }),
+          StreamMeshes: () => { throw failure; },
+        },
+      };
+      let captured;
+      try { sampleBoxes(failing, 40); } catch (err) { captured = err; }
+      check("Abort na amostra preserva erro e informa expressID, tipo e GUID", captured === failure &&
+        captured.ifcContext.expressID === 36 && captured.ifcContext.type === "IFCWALL" && captured.ifcContext.guid === "wall-guid");
       reads = releases = 0;
       const selected = cutModel(model, plane, { filterGuids: new Set([canonGuid("0BTBFw6f90Nfh9rP1dlXr2")]) });
       check("Seleção de um pilar lê apenas a geometria selecionada", selected.elementCount === 1 && reads === 1);

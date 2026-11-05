@@ -29,6 +29,8 @@ self.onmessage = async ({ data: { id, method, args } }) => {
     } else throw new Error("Operação IFC desconhecida.");
     self.postMessage({ id, result });
   } catch (error) {
-    self.postMessage({ id, error: { message: error.message || String(error), stack: error.stack } });
+    self.postMessage({ id, error: {
+      message: error.message || String(error), stack: error.stack, ifcContext: error.ifcContext,
+    } });
   }
 };
