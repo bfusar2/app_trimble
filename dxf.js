@@ -18,9 +18,28 @@ const safeLayer = (name) => String(name).replace(/[<>/\\":;?*|=,]/g, "_").slice(
  * layers: Map<nomeCamada, [{ points: [[x,y],...], closed }]>
  * units: "mm" | "m"
  */
-export function buildDxf(layers, { units = "mm" } = {}) {
+export function buildDxf(layers, options = {}) {
   const out = [];
-  const g = (code, value) => out.push(String(code), String(value));
+  writeDxf(layers, options, (code, value) => out.push(String(code), String(value)));
+  return out.join("\r\n") + "\r\n";
+}
+
+/** Gera o arquivo em blocos sem montar uma string única com todo o DXF. */
+export function buildDxfBlob(layers, options = {}) {
+  const parts = [];
+  let chunk = "";
+  writeDxf(layers, options, (code, value) => {
+    chunk += `${code}\r\n${value}\r\n`;
+    if (chunk.length >= 64 * 1024) {
+      parts.push(new Blob([chunk]));
+      chunk = "";
+    }
+  });
+  if (chunk) parts.push(new Blob([chunk]));
+  return new Blob(parts, { type: "application/dxf" });
+}
+
+function writeDxf(layers, { units = "mm" }, g) {
   const num = (x) => (Math.round(x * 1e4) / 1e4).toString();
 
   // Extensão do desenho (ajuda o CAD a dar zoom no lugar certo)
@@ -91,5 +110,4 @@ export function buildDxf(layers, { units = "mm" } = {}) {
   }
   g(0, "ENDSEC");
   g(0, "EOF");
-  return out.join("\r\n") + "\r\n";
 }

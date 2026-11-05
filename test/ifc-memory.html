@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><title>Leitura de vários IFCs</title></head>
+<body>
+  <h1>Memória e geometria de vários IFCs</h1>
+  <pre id="out">Rodando…</pre>
+  <script type="module">
+    import { openIfc, sampleBoxes, cutModel } from "../ifc.js";
+    import { makeSectionPlane } from "../section.js";
+    import { canonGuid } from "../guid.js";
+
+    const results = [];
+    const check = (nome, ok) => results.push({ nome, ok: !!ok });
+    const buffer = await (await fetch("teste.ifc")).arrayBuffer();
+    const plane = makeSectionPlane([0,0,1.5], [0,0,1]);
+    let model;
+    try {
+      model = await openIfc(buffer);
+      let reads = 0, releases = 0;
+      const getGeometry = model.api.GetGeometry.bind(model.api);
+      model.api.GetGeometry = (...args) => {
+        const geometry = getGeometry(...args);
+        reads++;
+        return {
+          GetVertexData: () => geometry.GetVertexData(),
+          GetVertexDataSize: () => geometry.GetVertexDataSize(),
+          GetIndexData: () => geometry.GetIndexData(),
+          GetIndexDataSize: () => geometry.GetIndexDataSize(),
+          delete: () => { releases++; geometry.delete(); },
+        };
+      };
+      const samples = sampleBoxes(model, 2);
+      check("Duas amostras leem só duas geometrias, sem percorrer todo o modelo", samples.length === 2 && reads === 2);
+      check("Geometrias das amostras são liberadas", reads === releases);
+      reads = releases = 0;
+      const selected = cutModel(model, plane, { filterGuids: new Set([canonGuid("0BTBFw6f90Nfh9rP1dlXr2")]) });
+      check("Seleção de um pilar lê apenas a geometria selecionada", selected.elementCount === 1 && reads === 1);
+      check("Geometria do corte é liberada", releases === reads);
+      reads = releases = 0;
+      let failed = false;
+      try { cutModel(model, { ...plane, point: [NaN,0,0] }); }
+      catch { failed = true; }
+      check("Falha durante corte libera a geometria em uso", failed && reads > 0 && reads === releases);
+      const getLine = model.api.GetLine;
+      model.api.GetLine = () => { throw new WebAssembly.RuntimeError("Aborted"); };
+      failed = false;
+      try { model.guidOf(36); } catch { failed = true; }
+      model.api.GetLine = getLine;
+      check("Falha WASM na consulta de GUID não é tratada como GUID ausente", failed);
+      model.close();
+      model.close();
+      check("Fechar duas vezes é seguro e libera o heap do leitor", !model.api.wasmModule);
+      model = null;
+      let total = 0;
+      for (let i = 0; i < 12; i++) {
+        model = await openIfc(buffer);
+        total += cutModel(model, plane).sectionElementCount;
+        model.close();
+        if (model.api.wasmModule) throw new Error("Leitor manteve o heap após fechar");
+        model = null;
+      }
+      check("Doze arquivos consecutivos geram os cortes e liberam cada leitor", total === 36);
+      let invalidRejected = false;
+      try {
+        model = await openIfc(new TextEncoder().encode("ISO-10303-21; INVALID").buffer);
+      } catch { invalidRejected = true; }
+      check("Arquivo malformado é rejeitado na abertura, mesmo se o leitor atribuir um modelID", invalidRejected);
+    } catch (err) {
+      check(String(err.stack || err), false);
+    } finally { model?.close(); }
+    window.__result = { total: results.length, falhas: results.filter(result => !result.ok) };
+    document.getElementById("out").textContent = JSON.stringify(window.__result, null, 2);
+  </script>
+</body>
+</html>

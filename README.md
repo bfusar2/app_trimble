@@ -7,14 +7,20 @@ Trimble Connect for Browser. Cada tipo de elemento vira uma camada
 ## Como funciona
 
 1. Lê o plano de corte ativo no visualizador (`viewer.getSectionPlanes`).
-2. Baixa o **IFC original** do modelo pela API do Trimble Connect (com o token do usuário logado).
-3. Abre o IFC no próprio navegador ([web-ifc](https://github.com/ThatOpen/engine_web-ifc)).
+2. Tenta reutilizar o **IFC original** fornecido pelo visualizador. Quando não está disponível, baixa o original pela API do Trimble Connect com o token do usuário.
+3. Abre cada IFC em um worker separado no navegador ([web-ifc](https://github.com/ThatOpen/engine_web-ifc)) e encerra esse worker após o arquivo, liberando sua memória.
 4. Alinha as coordenadas do IFC com as do visualizador comparando caixas envolventes dos mesmos objetos.
 5. Calcula a interseção do plano com todos os triângulos e junta os segmentos em polilinhas.
 6. Projeta também os contornos dos elementos entre o plano e a profundidade informada.
 7. Baixa o `.dxf` (R12, unidades em mm ou m).
 
 Nada sai do navegador do usuário: não existe servidor próprio.
+
+O cache da sessão guarda até 64 MB de IFCs por projeto, modelo e revisão. Arquivos
+maiores são processados sem permanecer no cache. **Limpar cache de IFCs** libera
+esses bytes. **Cancelar geração** interrompe o download ou o leitor em execução.
+Com **Só objetos selecionados**, os modelos sem seleção são dispensados antes
+da leitura. Falhas mostram o arquivo e a etapa, com o Log aberto automaticamente.
 
 ### Por que DXF e não DWG?
 DWG é um formato fechado da Autodesk e não existe gerador gratuito que rode no navegador.

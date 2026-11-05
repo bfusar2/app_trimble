@@ -38,6 +38,7 @@
     <!-- 2. Modelos -->
     <section>
       <h2>2. Modelo(s) IFC</h2>
+      <div class="actions"><button id="btn-models-all" class="secondary small">Marcar todos</button><button id="btn-models-none" class="secondary small">Desmarcar todos</button></div>
       <div id="models"><p class="hint">Carregando…</p></div>
       <label class="file">
         Ou carregar IFC do computador
@@ -66,7 +67,10 @@
     </section>
 
     <button id="btn-generate" class="primary">Gerar DXF</button>
-    <p id="progress" class="hint"></p>
+    <button id="btn-cancel" class="secondary" hidden>Cancelar geração</button>
+    <button id="btn-clear-cache" class="secondary small">Limpar cache de IFCs</button>
+    <p class="hint">Cache da sessão de até 64 MB. Arquivos são processados um por vez.</p>
+    <p id="progress" class="hint" role="status" aria-live="polite"></p>
     <p id="download"></p>
   </main>
 
@@ -76,6 +80,6 @@
   </details>
 
   <!-- Ao publicar uma versão nova, aumente o número abaixo -->
-  <script type="module" src="app.js?v=6"></script>
+  <script type="module" src="app.js?v=7"></script>
 </body>
 </html>

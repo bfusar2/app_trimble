@@ -13,34 +13,42 @@ const WEB_IFC_URL = `https://cdn.jsdelivr.net/npm/web-ifc@${WEB_IFC_VERSION}/`;
 // Elementos que não devem aparecer no corte
 const SKIP_TYPES = new Set(["IFCSPACE", "IFCOPENINGELEMENT", "IFCANNOTATION", "IFCVIRTUALELEMENT"]);
 
-let apiPromise = null;
-
-async function getApi() {
-  if (!apiPromise) {
-    apiPromise = (async () => {
-      const WebIFC = await import(`${WEB_IFC_URL}web-ifc-api.js`);
-      const api = new WebIFC.IfcAPI();
-      api.SetWasmPath(WEB_IFC_URL, true);
-      await api.Init(undefined, true); // força single-thread (não exige cross-origin isolation)
-      return api;
-    })();
-  }
-  return apiPromise;
-}
-
 /** Abre um IFC (ArrayBuffer). Retorna um "modelo" para usar nas outras funções. */
 export async function openIfc(buffer) {
-  const api = await getApi();
-  const modelID = api.OpenModel(new Uint8Array(buffer), { COORDINATE_TO_ORIGIN: false });
+  // Cada modelo tem seu próprio heap WASM. Dispose libera também a memória
+  // reservada pelo leitor, que CloseModel sozinho mantém para o próximo arquivo.
+  const WebIFC = await import(`${WEB_IFC_URL}web-ifc-api.js`);
+  const api = new WebIFC.IfcAPI();
+  let modelID;
+  try {
+    api.SetWasmPath(WEB_IFC_URL, true);
+    await api.Init(undefined, true);
+    modelID = api.OpenModel(new Uint8Array(buffer), { COORDINATE_TO_ORIGIN: false });
+    if (!Number.isInteger(modelID) || modelID < 0) throw new Error("O leitor não conseguiu abrir este IFC.");
+    // Alguns arquivos inválidos recebem um modelID válido, mas nenhum projeto.
+    const projects = api.GetLineIDsWithType(modelID, api.GetTypeCodeFromName("IFCPROJECT"));
+    try {
+      if (!projects.size()) throw new Error("IFC inválido ou ilegível: nenhum IfcProject encontrado.");
+    } finally {
+      projects.delete?.();
+    }
+  } catch (err) {
+    dispose();
+    throw err;
+  }
   const typeNames = new Map();
+  let closed = false;
+  let products;
+
+  // A instância pode estar abortada; a limpeza não deve esconder o erro original.
+  function dispose() {
+    try { api.Dispose(); } catch {}
+  }
 
   const typeOf = (expressID) => {
     const code = api.GetLineType(modelID, expressID);
     if (!typeNames.has(code)) {
-      let name = String(code);
-      try {
-        name = api.GetNameFromTypeCode(code) || name;
-      } catch {}
+      const name = api.GetNameFromTypeCode(code) || String(code);
       typeNames.set(code, name.toUpperCase());
     }
     return typeNames.get(code);
@@ -50,34 +58,50 @@ export async function openIfc(buffer) {
     api,
     modelID,
     typeOf,
-    guidOf: (expressID) => {
-      try {
-        return api.GetLine(modelID, expressID)?.GlobalId?.value;
-      } catch {
-        return undefined;
+    guidOf: (expressID) => api.GetLine(modelID, expressID)?.GlobalId?.value,
+    productIds: () => {
+      if (!products) {
+        const ids = api.GetLineIDsWithType(modelID, api.GetTypeCodeFromName("IFCPRODUCT"), true);
+        try {
+          products = Array.from({ length: ids.size() }, (_, i) => ids.get(i));
+        } finally {
+          ids.delete?.();
+        }
       }
+      return products;
     },
-    close: () => api.CloseModel(modelID),
+    close: () => {
+      if (closed) return;
+      closed = true;
+      try { api.CloseModel(modelID); } catch {}
+      dispose();
+    },
   };
 }
 
 /** Percorre todas as malhas do modelo já em coordenadas do mundo (m, Z para cima). */
-function forEachMesh(model, fn) {
+function forEachMesh(model, fn, expressIDs = null) {
   const { api, modelID } = model;
-  api.StreamAllMeshes(modelID, (mesh) => {
+  const callback = (mesh) => {
     const type = model.typeOf(mesh.expressID);
     if (SKIP_TYPES.has(type)) return;
     const pgs = mesh.geometries;
     for (let i = 0; i < pgs.size(); i++) {
       const pg = pgs.get(i);
       const geom = api.GetGeometry(modelID, pg.geometryExpressID);
-      const verts = api.GetVertexArray(geom.GetVertexData(), geom.GetVertexDataSize());
-      const index = api.GetIndexArray(geom.GetIndexData(), geom.GetIndexDataSize());
-      const positions = toWorld(verts, pg.flatTransformation);
-      fn({ expressID: mesh.expressID, type, positions, index });
-      if (typeof geom.delete === "function") geom.delete();
+      try {
+        const verts = api.GetVertexArray(geom.GetVertexData(), geom.GetVertexDataSize());
+        const index = api.GetIndexArray(geom.GetIndexData(), geom.GetIndexDataSize());
+        const positions = toWorld(verts, pg.flatTransformation);
+        fn({ expressID: mesh.expressID, type, positions, index });
+      } finally {
+        geom.delete?.();
+      }
     }
-  });
+  };
+  if (expressIDs) {
+    if (expressIDs.length) api.StreamMeshes(modelID, expressIDs, callback);
+  } else api.StreamAllMeshes(modelID, callback);
 }
 
 // verts: [x,y,z,nx,ny,nz,...] locais; m: matriz 4x4 column-major (saída Y-up).
@@ -103,20 +127,32 @@ function toWorld(verts, m) {
  * Usado para alinhar o IFC com as coordenadas do Visualizador 3D.
  */
 export function sampleBoxes(model, limit = 40) {
+  if (!Number.isInteger(limit) || limit <= 0) return [];
   const boxes = new Map(); // expressID -> {min,max}
-  forEachMesh(model, ({ expressID, positions }) => {
-    if (!boxes.has(expressID)) {
-      if (boxes.size >= limit) return;
-      boxes.set(expressID, { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] });
+  const candidates = model.productIds();
+  // Consulta os IDs sem triangular todo o modelo. Só gera geometria das
+  // próximas amostras até haver caixas suficientes para o alinhamento.
+  for (let start = 0; start < candidates.length && boxes.size < limit;) {
+    const batch = [];
+    while (start < candidates.length && batch.length < limit - boxes.size) {
+      const id = candidates[start++];
+      if (!SKIP_TYPES.has(model.typeOf(id)) && model.guidOf(id)) batch.push(id);
     }
-    const b = boxes.get(expressID);
-    for (let i = 0; i < positions.length; i += 3)
-      for (let a = 0; a < 3; a++) {
-        const v = positions[i + a];
-        if (v < b.min[a]) b.min[a] = v;
-        if (v > b.max[a]) b.max[a] = v;
+    forEachMesh(model, ({ expressID, positions }) => {
+      if (!positions.length) return;
+      if (!boxes.has(expressID)) {
+        if (boxes.size >= limit) return;
+        boxes.set(expressID, { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] });
       }
-  });
+      const b = boxes.get(expressID);
+      for (let i = 0; i < positions.length; i += 3)
+        for (let a = 0; a < 3; a++) {
+          const v = positions[i + a];
+          if (v < b.min[a]) b.min[a] = v;
+          if (v > b.max[a]) b.max[a] = v;
+        }
+    }, batch);
+  }
   return [...boxes].map(([expressID, b]) => ({ guid: model.guidOf(expressID), ...b })).filter((b) => b.guid);
 }
 
@@ -132,11 +168,27 @@ export function cutModel(model, plane, { scale = 1000, filterGuids = null, depth
   const result = new Map();
   const views = new Map(), pieces = new Map();
   const elements = new Set(), sectionElements = new Set(), viewElements = new Set();
+  const selected = filterGuids ? model.productIds().filter(id => filterGuids.has(canonGuid(model.guidOf(id)))) : null;
   forEachMesh(model, ({ expressID, type, positions, index }) => {
-    if (filterGuids && !filterGuids.has(canonGuid(model.guidOf(expressID)))) return;
+    // Rejeita a malha fora da faixa antes de soldar vértices e criar as
+    // estruturas de arestas da projeção, que são a parte mais custosa da vista.
+    let min = Infinity, max = -Infinity;
+    for (let i = 0; i < positions.length; i += 3) {
+      const distance = (positions[i] - plane.point[0]) * plane.normal[0] +
+        (positions[i + 1] - plane.point[1]) * plane.normal[1] +
+        (positions[i + 2] - plane.point[2]) * plane.normal[2];
+      if (!Number.isFinite(distance)) throw new Error("Malha do IFC contém coordenadas inválidas.");
+      min = Math.min(min, distance);
+      max = Math.max(max, distance);
+    }
+    const crossesSection = min <= 0 && max >= 0;
+    const near = direction === 1 ? min : -max;
+    const far = direction === 1 ? max : -min;
+    const inView = depth > 0 && near <= depth + 1e-7 && far >= -1e-7;
+    if (!crossesSection && !inView) return;
     if (!result.has(type)) result.set(type, []);
     const start = result.get(type).length;
-    if (sliceMesh(positions, index, plane, scale, result.get(type)) > 0) {
+    if (crossesSection && sliceMesh(positions, index, plane, scale, result.get(type)) > 0) {
       elements.add(expressID);
       sectionElements.add(expressID);
       if (hatching) {
@@ -144,14 +196,14 @@ export function cutModel(model, plane, { scale = 1000, filterGuids = null, depth
         for (let i=start; i<result.get(type).length; i++) pieces.get(expressID).push(result.get(type)[i]);
       }
     }
-    if (depth > 0) {
+    if (inView) {
       if (!views.has(type)) views.set(type, []);
       if (projectMeshDepth(positions, index, plane, { depth, direction, scale }, views.get(type)) > 0) {
         elements.add(expressID);
         viewElements.add(expressID);
       }
     }
-  });
+  }, selected);
   for (const [k, v] of result) if (!v.length) result.delete(k);
   for (const [k, v] of views) if (!v.length) views.delete(k);
   return {

@@ -1,0 +1,84 @@
+﻿<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><title>Teste de lote IFC</title></head>
+<body><h1>Fluxo de vários IFCs</h1><pre id="out">Rodando…</pre><iframe id="app" style="width:420px;height:850px"></iframe>
+<script type="module">
+const results = [];
+const check = (nome, ok) => { results.push({nome,ok:!!ok}); show(); };
+function show() { document.getElementById('out').textContent = results.map(r => `${r.ok ? 'OK' : 'FALHA'} — ${r.nome}`).join('\n'); }
+const fixture = await (await fetch('teste.ifc')).text();
+const original = new Blob([fixture]);
+let hostCalls=0, downloads=0, selection=false, block=false, broken=false;
+let release;
+const models=['a','b','c'].map(id=>({id,name:id+'.ifc',versionId:'1'}));
+window.fakeAPI={
+ project:{getCurrentProject:async()=>({id:'test',name:'Teste',location:'northAmerica'})},
+ extension:{requestPermission:async()=> 'x'.repeat(40)},
+ viewer:{
+  getModels:async()=>models,
+  getSectionPlanes:async()=>[{id:'plane',positionX:0,positionY:0,positionZ:1500,directionX:0,directionY:0,directionZ:1}],
+  getLoadedModel:async id=>{
+   hostCalls++;
+   if(block) await new Promise(resolve=>{release=resolve;});
+   return {id,versionId:'1',blob:broken?new Blob(['ISO-10303-21; INVALID']):id==='c'?new Blob(['TRB']):original};
+  },
+  convertToObjectRuntimeIds:async(id,guids)=>guids.map((_,i)=>i+1),
+  getObjectBoundingBoxes:async()=>[],
+  getSelection:async()=>selection?[{modelId:'b',objectRuntimeIds:[66]}]:[],
+  convertToObjectIds:async()=>['0BTBFw6f90Nfh9rP1dlXr2'],
+ }
+};
+window.fakeDownload=()=>{downloads++;return new Response(JSON.stringify({url:new URL('teste.ifc',location.href).href}),{headers:{'Content-Type':'application/json'}});};
+const html=await (await fetch('../index.html')).text();
+const stub=`<base href="${new URL('../',location.href)}"><script>
+window.TrimbleConnectWorkspace={connect:async(parent,onEvent)=>{window.testEvent=onEvent;return parent.fakeAPI;}};
+const originalFetch=window.fetch.bind(window);
+window.fetch=(url,options)=>String(url).includes('/downloadurl')?Promise.resolve(parent.fakeDownload()):originalFetch(url,options);
+HTMLAnchorElement.prototype.click=function(){};
+<\/script>`;
+const frame=document.getElementById('app');
+frame.srcdoc=html.replace(/<script src="https:\/\/components[^>]+><\/script>/,stub);
+const until=async(test)=>{for(let i=0;i<400;i++){if(test())return;await new Promise(r=>setTimeout(r,50));}throw Error('Tempo de espera esgotado');};
+let doc;
+try {
+ await until(()=>frame.contentDocument?.getElementById('models')?.querySelectorAll('input').length===3);
+ doc=frame.contentDocument;
+ const run=async()=>{doc.getElementById('btn-generate').click();await until(()=>!doc.getElementById('btn-generate').disabled);};
+ await run();
+ check('Três IFCs geram um DXF no fluxo normal',doc.getElementById('progress').textContent.includes('Pronto: 3 arquivo(s)')&&!!doc.getElementById('download').querySelector('a'));
+ check('Dois IFCs do host e um download de reserva',hostCalls===3&&downloads===1);
+ await run();
+ check('Segunda geração reutiliza o cache dos três modelos',hostCalls===3&&downloads===1&&doc.getElementById('progress').textContent.includes('Pronto:'));
+ doc.querySelector('#models input').click();
+ doc.getElementById('btn-refresh').click();
+ await until(()=>!doc.querySelector('#models input').checked);
+ check('Atualizar planos preserva modelos desmarcados',!doc.querySelector('#models input').checked);
+ doc.getElementById('btn-models-all').click();
+ doc.getElementById('opt-selected').click();selection=true;
+ doc.getElementById('btn-clear-cache').click();
+ const before=hostCalls;
+ await run();
+ check('Seleção baixa somente o modelo com objetos selecionados',hostCalls===before+1&&doc.getElementById('progress').textContent.includes('Pronto: 1 arquivo(s)'));
+ doc.getElementById('opt-selected').click();selection=false;
+ doc.getElementById('btn-clear-cache').click();block=true;
+ doc.getElementById('btn-generate').click();
+ await until(()=>release);
+ doc.getElementById('btn-cancel').click();
+ await until(()=>!doc.getElementById('btn-generate').disabled);
+ check('Cancelamento durante obtenção do IFC restaura o painel',doc.getElementById('progress').textContent==='Geração cancelada.');
+ block=false;release();
+ doc.getElementById('btn-generate').click();
+ await until(()=>doc.getElementById('progress').textContent.includes('Lendo a.ifc'));
+ doc.getElementById('btn-cancel').click();
+ await until(()=>!doc.getElementById('btn-generate').disabled);
+ check('Cancelar a leitura encerra o worker e restaura o painel',doc.getElementById('progress').textContent==='Geração cancelada.');
+ doc.getElementById('btn-clear-cache').click();
+ broken=true;
+ await run();
+ await until(()=>doc.getElementById('progress').textContent.startsWith('Erro:'));
+ check('Erro identifica arquivo, etapa e abre o Log',doc.getElementById('progress').textContent.includes('a.ifc')&&doc.getElementById('progress').textContent.includes('leitura do IFC')&&doc.getElementById('log-box').open);
+ broken=false;doc.getElementById('btn-clear-cache').click();
+ await run();
+ check('Nova tentativa após falha usa leitor novo e conclui',doc.getElementById('progress').textContent.includes('Pronto: 3 arquivo(s)'));
+} catch(error) {check(error.stack||String(error),false);}
+window.__result={total:results.length,falhas:results.filter(r=>!r.ok)};show();
+</script></body></html>
