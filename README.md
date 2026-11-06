@@ -6,6 +6,13 @@ Trimble Connect for Browser. Cada tipo de elemento vira uma camada
 
 ## Como funciona
 
+Para modelos que excedem a capacidade do navegador, a versão 9 também exporta
+a configuração da tesoura para o **[Corte DXF Local](companion/README.md)**.
+O auxiliar Windows prepara os IFCs do computador, mantém a geometria em disco
+e reutiliza esse resultado nos cortes seguintes. O fluxo original no navegador
+continua disponível. Veja os testes comparativos em `experiments/thatopen/` e
+`native-bench/`.
+
 1. Lê o plano de corte ativo no visualizador (`viewer.getSectionPlanes`).
 2. Tenta reutilizar o **IFC original** fornecido pelo visualizador. Quando não está disponível, baixa o original pela API do Trimble Connect com o token do usuário.
 3. Abre cada IFC em um worker separado no navegador ([web-ifc](https://github.com/ThatOpen/engine_web-ifc)) e encerra esse worker após o arquivo, liberando sua memória.

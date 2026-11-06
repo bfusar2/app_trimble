@@ -38,7 +38,7 @@ window.fetch=(url,options)=>String(url).includes('/downloadurl')?Promise.resolve
 HTMLAnchorElement.prototype.click=function(){window.lastDownload={name:this.download,url:this.href};};
 <\/script>`;
 const frame=document.getElementById('app');
-frame.srcdoc=html.replace(/<script src="https:\/\/components[^>]+><\/script>/,stub);
+frame.srcdoc=html.replace('<head>',`<head><base href="${new URL('../',location.href)}">`).replace(/<script src="https:\/\/components[^>]+><\/script>/,stub);
 const until=async(test)=>{for(let i=0;i<1200;i++){if(test())return;await new Promise(r=>setTimeout(r,50));}throw Error('Tempo de espera esgotado');};
 let doc;
 try {
@@ -102,6 +102,14 @@ try {
  selection='multiple';doc.getElementById('opt-selected').click();
  await run();
  check('Falha de seleção de um modelo permite gerar o DXF dos outros selecionados',doc.getElementById('progress').textContent.includes('Pronto: 2 arquivo(s), 2 elemento(s)')&&doc.getElementById('skipped-files').textContent.includes('b.ifc'));
+ selection=false;doc.getElementById('opt-selected').click();
+ const beforeExport={hostCalls,downloads};
+ doc.getElementById('btn-export-local').click();
+ await until(()=>doc.getElementById('progress').textContent.includes('Configuração exportada'));
+ const job=JSON.parse(await (await fetch(frame.contentWindow.lastDownload.url)).text());
+ check('Configuração local preserva plano, profundidade e modelos',job.schema==='corte-dxf-job'&&job.models.length===3&&job.drawing.point[2]===1.5&&job.drawing.depth===5);
+ check('Exportação local não baixa IFC nem inclui credenciais',hostCalls===beforeExport.hostCalls&&downloads===beforeExport.downloads&&!JSON.stringify(job).toLowerCase().includes('token'));
+ check('Referências indisponíveis ficam explícitas para conferir no auxiliar',job.warnings.some(w=>w.code==='REFERENCE_QUERY_FAILED')&&job.alignmentPolicy==='require-verified');
 } catch(error) {check(error.stack||String(error),false);}
 window.__result={total:results.length,falhas:results.filter(r=>!r.ok)};show();
 </script></body></html>

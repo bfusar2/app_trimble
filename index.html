@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Corte DXF – Interalli</title>
   <link rel="icon" href="icon.svg" />
-  <link rel="stylesheet" href="style.css?v=8" />
+  <link rel="stylesheet" href="style.css?v=9" />
   <!-- Workspace API oficial da Trimble (ponte entre o iframe e o Trimble Connect) -->
   <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
 </head>
@@ -72,6 +72,12 @@
     <p class="hint">Cache da sessão de até 64 MB. Arquivos são processados um por vez. IFCs acima de 1 GB ou com falha são ignorados; o DXF é gerado com os demais.</p>
     <p id="progress" class="hint" role="status" aria-live="polite"></p>
     <p id="download"></p>
+    <details id="local-processing">
+      <summary>IFCs grandes: processar no computador</summary>
+      <p class="hint">Exporte a configuração da tesoura e abra no Corte DXF Local. Os IFCs são lidos do computador e a geometria fica preparada para reutilizar nos próximos cortes.</p>
+      <button id="btn-export-local" class="secondary small">Exportar configuração do corte</button>
+      <p class="hint"><a href="companion/" target="_blank" rel="noopener">Baixar auxiliar e ver instruções</a>. Use a mesma revisão dos arquivos do Trimble. Alinhamentos sem referências suficientes precisam ser conferidos.</p>
+    </details>
     <div id="warnings" class="hint" aria-live="polite" hidden>
       <strong>IFCs ignorados no DXF</strong>
       <ul id="skipped-files"></ul>
@@ -85,6 +91,6 @@
   </details>
 
   <!-- Ao publicar uma versão nova, aumente o número abaixo -->
-  <script type="module" src="app.js?v=8"></script>
+  <script type="module" src="app.js?v=9"></script>
 </body>
 </html>

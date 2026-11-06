@@ -13,6 +13,7 @@ const [
   { buildDxfBlob },
   { fitAlignment },
   { expandIfcGuid, canonGuid },
+  { buildTrimbleJob },
 ] = await Promise.all([
   import(`./ifc-client.js${V}`),
   import(`./model-source.js${V}`),
@@ -20,6 +21,7 @@ const [
   import(`./dxf.js${V}`),
   import(`./align.js${V}`),
   import(`./guid.js${V}`),
+  import(`./trimble-job.js${V}`),
 ]);
 
 // Erro médio máximo aceito no alinhamento (m). Acima disso o corte não é exportado.
@@ -76,6 +78,7 @@ async function init() {
   log(`Versão ${V || "(sem número)"}`);
   $("btn-refresh").onclick = refresh;
   $("btn-generate").onclick = () => generate().catch(onError);
+  $("btn-export-local").onclick = () => exportLocalJob().catch(onError);
   $("file").onchange = renderModels;
   $("btn-cancel").onclick = () => {
     generation?.controller.abort();
@@ -98,6 +101,7 @@ async function init() {
     setStatus("Modo local", "warn");
     $("manual-plane").hidden = false;
     $("btn-refresh").hidden = true;
+    $("local-processing").hidden = true;
     $("planes").innerHTML = '<p class="hint">Fora do Trimble Connect: informe o plano abaixo.</p>';
     renderModels();
     return;
@@ -398,6 +402,44 @@ function withAbort(promise, signal) {
     if (signal.aborted) abort();
     Promise.resolve(promise).then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
   });
+}
+
+async function exportLocalJob() {
+  if (generation) return;
+  if (!API) throw new Error("Conecte ao Trimble antes de exportar a configuração.");
+  const plane = planes[Number(document.querySelector('input[name="plane"]:checked')?.value)];
+  if (!plane) throw new Error("Escolha o plano da tesoura.");
+  const checked = [...document.querySelectorAll('#models input[type="checkbox"]:checked')].map(c => models[Number(c.value)]);
+  const options = {
+    depth: Number($("opt-depth").value), direction: $("opt-depth-reverse").checked ? 1 : -1,
+    units: $("opt-units").value, mirror: $("opt-mirror").checked,
+    grid: $("opt-grid").checked, hatching: $("opt-hatch").checked,
+    onlySelected: $("opt-selected").checked,
+  };
+  if (!$("opt-depth").value.trim()) throw new Error("Informe a profundidade em metros.");
+  const run = { controller: new AbortController(), session: null, refreshPending: false };
+  generation = run;
+  const controls = [...document.querySelectorAll("main input, main select, main button")];
+  const disabled = controls.map(c => c.disabled);
+  controls.forEach(c => { c.disabled = true; });
+  $("btn-cancel").hidden = false; $("btn-cancel").disabled = false;
+  try {
+    progress("Consultando referências de alinhamento para o processamento local…");
+    const job = await buildTrimbleJob({ project: { ...project, region: project?.location }, plane, options, models: checked, api: API, signal: run.controller.signal });
+    run.controller.signal.throwIfAborted();
+    if (downloadUrl) URL.revokeObjectURL(downloadUrl);
+    offerDownload(new Blob([JSON.stringify(job, null, 2)], { type: "application/json" }), "corte-trimble.json");
+    for (const warning of job.warnings) log("Processamento local", warning);
+    progress(`Configuração exportada: ${job.models.length} modelo(s). Abra no Corte DXF Local e escolha os IFCs da mesma revisão.` +
+      (job.warnings.length ? " Há referências a conferir; veja o Log." : ""));
+  } catch (error) {
+    if (run.controller.signal.aborted) progress("Exportação cancelada.");
+    else throw error;
+  } finally {
+    controls.forEach((c, i) => { c.disabled = disabled[i]; });
+    $("btn-cancel").hidden = true; generation = null;
+    if (run.refreshPending) refresh();
+  }
 }
 
 async function generate() {

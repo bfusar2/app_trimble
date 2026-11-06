@@ -1,0 +1,1 @@
+{"name":"trimble-thatopen-probe","private":true,"type":"module","dependencies":{"@thatopen/components":"^3.6.0","@thatopen/components-front":"^3.6.0","@thatopen/fragments":"^3.6.0","three":"^0.187.0","web-ifc":"^0.0.78"}}
