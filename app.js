@@ -79,6 +79,7 @@ async function init() {
   $("btn-refresh").onclick = refresh;
   $("btn-generate").onclick = () => generate().catch(onError);
   $("btn-export-local").onclick = () => exportLocalJob().catch(onError);
+  $("btn-export-local-warning").onclick = () => exportLocalJob().catch(onError);
   $("file").onchange = renderModels;
   $("btn-cancel").onclick = () => {
     generation?.controller.abort();
@@ -455,6 +456,7 @@ async function generate() {
   $("download").innerHTML = "";
   $("skipped-files").replaceChildren();
   $("warnings").hidden = true;
+  $("local-hint").hidden = true;
   if (downloadUrl) { URL.revokeObjectURL(downloadUrl); downloadUrl = null; }
   let currentFile = "", stage = "opções";
   try {
@@ -566,7 +568,11 @@ async function generate() {
         item.textContent = `${job.label} — ${reason}`;
         $("skipped-files").append(item);
         $("warnings").hidden = false;
-        $("log-box").open = true;
+        // Arquivo acima do limite do navegador: leva direto ao processamento local.
+        if (err?.code === "IFC_TOO_LARGE" || reason === "IFC muito pesado ou incompatível com o leitor.") {
+          $("local-hint").hidden = false;
+          $("local-processing").open = true;
+        } else $("log-box").open = true;
         log("IFC ignorado", { arquivo: job.label, etapa: stage, motivo: reason,
           mensagem: err?.message || String(err), elemento: err.ifcContext, stack: err.stack });
         continue;

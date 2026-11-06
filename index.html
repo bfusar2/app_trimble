@@ -81,6 +81,14 @@
     <div id="warnings" class="hint" aria-live="polite" hidden>
       <strong>IFCs ignorados no DXF</strong>
       <ul id="skipped-files"></ul>
+      <p id="local-hint" hidden>
+        <strong>Arquivo grande demais para o navegador.</strong>
+        Gere o corte no computador: clique em
+        <button id="btn-export-local-warning" class="secondary small">Exportar configuração do corte</button>
+        e abra o arquivo salvo no
+        <a href="companion/" target="_blank" rel="noopener">Corte DXF Local</a>
+        (baixe o auxiliar na página). Ele processa os modelos marcados, inclusive este.
+      </p>
     </div>
   </main>
 
@@ -91,6 +99,6 @@
   </details>
 
   <!-- Ao publicar uma versão nova, aumente o número abaixo -->
-  <script type="module" src="app.js?v=9"></script>
+  <script type="module" src="app.js?v=10"></script>
 </body>
 </html>

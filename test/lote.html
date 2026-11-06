@@ -92,13 +92,14 @@ try {
  await run();
  check('IFC de 1,11 GB é ignorado pelos metadados antes de obter seu conteúdo',hostCalls===hostsBeforeHeavy+2&&doc.getElementById('skipped-files').textContent.includes('IFC muito pesado'));
  check('IFC pesado não impede o download do DXF dos demais modelos',doc.getElementById('progress').textContent.includes('Pronto: 2 arquivo(s)')&&doc.getElementById('download').querySelector('a')?.download.includes('parcial_'));
+ check('IFC pesado mostra como processar no computador e abre essa seção',!doc.getElementById('local-hint').hidden&&doc.getElementById('local-processing').open&&!!doc.getElementById('btn-export-local-warning'));
  doc.getElementById('btn-download-log').click();
  const saved=frame.contentWindow.lastDownload;
  const logText=await (await fetch(saved.url)).text();
  check('Baixar Log preserva os detalhes completos em texto',saved.name==='corte-dxf-log.txt'&&logText.includes('IFC ignorado')&&logText.includes('b.ifc'));
  heavy=false;doc.getElementById('btn-clear-cache').click();
  await run();
- check('Nova geração limpa avisos anteriores quando todos funcionam',doc.getElementById('warnings').hidden&&doc.getElementById('progress').textContent.includes('Pronto: 3 arquivo(s)')&&!doc.getElementById('download').querySelector('a').download.includes('parcial_'));
+ check('Nova geração limpa avisos anteriores quando todos funcionam',doc.getElementById('warnings').hidden&&doc.getElementById('local-hint').hidden&&doc.getElementById('progress').textContent.includes('Pronto: 3 arquivo(s)')&&!doc.getElementById('download').querySelector('a').download.includes('parcial_'));
  selection='multiple';doc.getElementById('opt-selected').click();
  await run();
  check('Falha de seleção de um modelo permite gerar o DXF dos outros selecionados',doc.getElementById('progress').textContent.includes('Pronto: 2 arquivo(s), 2 elemento(s)')&&doc.getElementById('skipped-files').textContent.includes('b.ifc'));
@@ -110,6 +111,11 @@ try {
  check('Configuração local preserva plano, profundidade e modelos',job.schema==='corte-dxf-job'&&job.models.length===3&&job.drawing.point[2]===1.5&&job.drawing.depth===5);
  check('Exportação local não baixa IFC nem inclui credenciais',hostCalls===beforeExport.hostCalls&&downloads===beforeExport.downloads&&!JSON.stringify(job).toLowerCase().includes('token'));
  check('Referências indisponíveis ficam explícitas para conferir no auxiliar',job.warnings.some(w=>w.code==='REFERENCE_QUERY_FAILED')&&job.alignmentPolicy==='require-verified');
+ const firstExport=frame.contentWindow.lastDownload.url;
+ doc.getElementById('btn-export-local-warning').click();
+ await until(()=>frame.contentWindow.lastDownload.url!==firstExport);
+ const again=JSON.parse(await (await fetch(frame.contentWindow.lastDownload.url)).text());
+ check('Botão do aviso exporta a mesma configuração do processamento local',again.schema==='corte-dxf-job'&&again.models.length===3);
 } catch(error) {check(error.stack||String(error),false);}
 window.__result={total:results.length,falhas:results.filter(r=>!r.ok)};show();
 </script></body></html>
