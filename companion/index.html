@@ -2,8 +2,9 @@
 <body style="max-width:760px;margin:32px auto;padding:20px">
 <h1>Corte DXF Local</h1>
 <p>Prepare seus IFCs no computador e reutilize a geometria nos próximos cortes do Trimble.</p>
-<p><a class="download" href="https://github.com/bfusar2/app_trimble/releases/download/local-v1.1.0/CorteDXFLocal-Windows-x64.zip">Baixar auxiliar para Windows x64 (versão 1.1)</a></p>
-<ol><li>Extraia o ZIP inteiro e abra <strong>CorteDXFLocal.exe</strong>.</li><li>No painel do Trimble, posicione a tesoura e clique em <strong>Exportar configuração do corte</strong>. O auxiliar abre sozinho a exportação mais recente da pasta Downloads.</li><li>Na primeira vez, escolha a pasta dos IFCs da mesma revisão (para outro nome de arquivo, dê duplo clique na linha). A pasta e as escolhas ficam lembradas.</li><li>Clique em <strong>Gerar DXF</strong>: ele é salvo ao lado da configuração. A primeira preparação pode demorar; os próximos cortes reutilizam a geometria salva.</li></ol>
+<p><a class="download" href="https://github.com/bfusar2/app_trimble/releases/download/local-v1.2.0/CorteDXFLocal-Windows-x64.zip">Baixar auxiliar para Windows x64 (versão 1.2)</a></p>
+<ol><li>Extraia o ZIP e abra <strong>CorteDXFLocal.exe</strong>.</li><li>No Trimble, posicione a tesoura e clique em <strong>Exportar configuração do corte</strong>. O corte aparece sozinho no auxiliar.</li><li>Clique em <strong>Gerar DXF</strong>. Se o auxiliar não souber onde está algum IFC, ele pergunta: escolha o arquivo no computador. Ele lembra para as próximas vezes.</li></ol>
+<p>Escolha o IFC da mesma revisão que está no Trimble (por exemplo, a R3). O DXF é salvo na pasta Downloads; o botão <strong>Mostrar DXF na pasta</strong> abre o arquivo no Explorer. O primeiro corte de um IFC grande pode levar alguns minutos; os seguintes são rápidos.</p>
 <p>O auxiliar confere o alinhamento por referências do Trimble. Se o IFC tiver um único objeto ou poucas referências, será necessário conferir as coordenadas antes de permitir o uso das coordenadas originais.</p>
 <p>Um arquivo com problema é listado no relatório e o DXF dos demais é identificado como parcial. A projeção mantém linhas ocultas entre objetos.</p>
 <p><a href="https://github.com/bfusar2/app_trimble/blob/main/companion/README.md">Instruções completas e funcionamento do cache</a></p>

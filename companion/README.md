@@ -6,27 +6,34 @@ extensão do Trimble Connect; não precisa receber sua senha ou chave de API.
 
 ## Como usar
 
-1. No Trimble, posicione a tesoura e clique em **Exportar configuração do
+1. Abra `CorteDXFLocal.exe`.
+2. No Trimble, posicione a tesoura e clique em **Exportar configuração do
    corte** (no aviso de IFC pesado ou em **IFCs grandes: processar no
-   computador**). O arquivo `corte-trimble.json` vai para a pasta Downloads.
-2. Abra `CorteDXFLocal.exe`. Ele abre sozinho a configuração mais recente da
-   pasta Downloads e, com ele aberto, carrega cada nova exportação do painel.
-3. Na primeira vez, clique em **Escolher pasta de IFCs**: o auxiliar procura
-   também nas subpastas e associa nomes únicos. Para nomes diferentes ou
-   repetidos, dê duplo clique na linha e escolha o IFC. A pasta e essas escolhas
-   ficam lembradas em `%USERPROFILE%\.corte-dxf\settings.json`.
-4. Se aparecer a caixa de confirmação de coordenadas, marque-a somente depois
-   de conferir (veja **Alinhamento**). Ela só aparece para modelos com menos de
-   três referências.
-5. Clique em **Gerar DXF**. O arquivo é salvo ao lado do JSON
-   (`corte_AAAAMMDD_HHMM.dxf`, sem sobrescrever) e **Mostrar DXF na pasta** abre
-   o Explorer nele.
+   computador**). O corte aparece sozinho no auxiliar: ele lê o
+   `corte-trimble.json` mais recente da pasta Downloads.
+3. Clique em **Gerar DXF**. Se algum IFC não estiver localizado (aparece em
+   vermelho como "Não localizado"), o auxiliar pergunta onde ele está. Escolha o
+   arquivo; se cancelar, ele pergunta se deve gerar sem aquele modelo.
+4. O DXF é salvo ao lado do JSON (`corte_AAAAMMDD_HHMM.dxf`, sem sobrescrever).
+   **Mostrar DXF na pasta** abre o Explorer nele.
 
-Use a mesma revisão dos arquivos exibidos no Trimble. Um arquivo escolhido por
-duplo clique só é reaproveitado para a mesma revisão do modelo; quando o Trimble
-tem uma revisão nova, o auxiliar pede o IFC atualizado. A correspondência por
-nome na pasta não comprova a revisão: com uma pasta sincronizada pelo Trimble
-Connect Desktop, ela acompanha a versão atual.
+O auxiliar lembra o que você escolheu, em `%USERPROFILE%\.corte-dxf\settings.json`:
+
+- A pasta do primeiro IFC escolhido vira a pasta dos IFCs; nos próximos cortes,
+  os modelos com o mesmo nome de arquivo são encontrados nela (também em
+  subpastas). **Procurar todos numa pasta…** troca essa pasta.
+- Um arquivo escolhido para um modelo é reaproveitado só para a mesma revisão.
+  Quando o Trimble tem uma revisão nova, o modelo volta a "Não localizado" e o
+  auxiliar pergunta pelo arquivo atualizado.
+- **Localizar IFC…** troca o arquivo do modelo selecionado na lista.
+
+Escolha sempre a mesma revisão exibida no Trimble. Encontrar um arquivo pelo
+nome não comprova a revisão; uma pasta sincronizada pelo Trimble Connect Desktop
+acompanha a versão atual.
+
+A caixa **Confirmo que usam as mesmas coordenadas da tesoura** só aparece para
+modelos com menos de três referências e começa desmarcada a cada corte (veja
+**Alinhamento**).
 
 Pode usar uma pasta sincronizada pelo Trimble Connect Desktop como origem dos
 IFCs. O auxiliar não precisa baixar os arquivos novamente a cada corte. Na

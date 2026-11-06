@@ -7,7 +7,7 @@ import tempfile
 import time
 import unittest
 
-from helper import (default_output, downloads_folder, latest_job, load_settings, needs_confirmation,
+from helper import (adopt_choice, default_output, downloads_folder, latest_job, load_settings, needs_confirmation,
                     remember_file, restore_paths, save_settings)
 
 
@@ -102,6 +102,26 @@ class HelperFlowTests(unittest.TestCase):
         self.assertEqual(second.name,'corte_20261105_2130_2.dxf')
         second.with_name('corte_20261105_2130_2_parcial.dxf').write_text('x')   # parcial também conta
         self.assertEqual(default_output(job,now).name,'corte_20261105_2130_3.dxf')
+
+    def test_first_chosen_file_teaches_the_folder_and_finds_the_others(self):
+        torre=self.touch('ifcs/Torre.ifc','ISO-10303-21;')
+        galeria=self.touch('ifcs/sub/Galeria.ifc','ISO-10303-21;')
+        models=[{'id':'t','name':'Torre.ifc','versionId':'1'},{'id':'g','name':'Galeria.ifc','versionId':'1'},
+                {'id':'r','name':'Redler.ifc','versionId':'1'}]
+        settings={};paths={}
+        found=adopt_choice(settings,models,paths,models[0],torre)
+        self.assertEqual(settings['folder'],str(torre.parent))
+        self.assertEqual(found,{'g':str(galeria)})
+        self.assertEqual(paths,{'t':str(torre),'g':str(galeria)})        # Redler continua faltando
+        self.assertEqual(settings['files']['t']['path'],str(torre))     # escolha lembrada
+
+    def test_choice_elsewhere_keeps_the_remembered_folder(self):
+        outro=self.touch('outra/model-r3.ifc','ISO-10303-21;')
+        settings={'folder':str(self.root/'projeto')};paths={}
+        adopt_choice(settings,[{'id':'g','name':'Galeria R3.ifc','versionId':'3'}],paths,
+                     {'id':'g','name':'Galeria R3.ifc','versionId':'3'},outro)
+        self.assertEqual(settings['folder'],str(self.root/'projeto'))
+        self.assertEqual(paths,{'g':str(outro)})
 
     def test_downloads_folder_exists(self):
         self.assertTrue(downloads_folder().is_dir())

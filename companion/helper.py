@@ -116,8 +116,25 @@ def default_output(job_path,now=None):
     return candidate
 
 
+def adopt_choice(settings,models,paths,item,path):
+    """Registra o IFC escolhido para um modelo e aproveita a pasta dele.
+
+    Sem pasta lembrada, a pasta do arquivo escolhido passa a ser a pasta dos IFCs,
+    e os outros modelos ainda sem arquivo são procurados nela pelo nome.
+    Retorna os modelos encontrados assim (id -> caminho), já incluídos em `paths`.
+    """
+    paths[item['id']]=str(path)
+    remember_file(settings,item,path)
+    if not settings.get('folder'):settings['folder']=str(Path(path).parent)
+    missing=[model for model in models if model['id'] not in paths]
+    found={}
+    if missing and Path(settings['folder']).is_dir():found,_=match_folder(settings['folder'],missing)
+    paths.update(found)
+    return found
+
+
 def gui():
-    root=tk.Tk();root.title('Corte DXF Local');root.geometry('860x680')
+    root=tk.Tk();root.title('Corte DXF Local');root.geometry('860x700')
     settings=load_settings()
     downloads=downloads_folder()
     newest=latest_job(downloads)
@@ -127,14 +144,16 @@ def gui():
     cache=HOME/'cache'
     frame=ttk.Frame(root,padding=16);frame.pack(fill='both',expand=True)
     ttk.Label(frame,text='Corte DXF Local',font=('Segoe UI',18,'bold')).pack(anchor='w')
-    ttk.Label(frame,text='Exporte a configuração do corte no painel do Trimble. Ela abre aqui sozinha; '
-              'confira os IFCs e clique em Gerar DXF.',wraplength=810).pack(anchor='w',pady=8)
-    header=ttk.Frame(frame);header.pack(fill='x')
+    ttk.Label(frame,text='1. No painel do Trimble, clique em "Exportar configuração do corte": ela aparece aqui sozinha.\n'
+              '2. Clique em "Gerar DXF". Se algum IFC não for encontrado, o auxiliar pergunta onde ele está.',
+              wraplength=810,justify='left').pack(anchor='w',pady=8)
     label=ttk.Label(frame,text='Aguardando a configuração exportada no Trimble (pasta Downloads).',wraplength=810)
     label.pack(anchor='w',pady=6)
-    table=ttk.Treeview(frame,columns=('name','path'),show='headings',height=8)
-    table.heading('name',text='Modelo no Trimble');table.heading('path',text='IFC no computador (duplo clique para trocar)')
+    table=ttk.Treeview(frame,columns=('name','path'),show='headings',height=8,selectmode='browse')
+    table.heading('name',text='Modelo no Trimble');table.heading('path',text='Arquivo IFC neste computador')
     table.column('name',width=330);table.column('path',width=450);table.pack(fill='x')
+    table.tag_configure('missing',foreground='#b00020')
+    files_bar=ttk.Frame(frame);files_bar.pack(fill='x',pady=(6,0))
     confirm=tk.BooleanVar(value=False)
     confirm_box=ttk.Frame(frame)
     check=ttk.Checkbutton(confirm_box,variable=confirm)
@@ -143,16 +162,25 @@ def gui():
               'Marque somente se eles não foram movidos nem girados no visualizador. Vale para todo o lote.',
               wraplength=810).pack(anchor='w')
     actions=ttk.Frame(frame);actions.pack(fill='x',pady=10)
-    log=tk.Text(frame,height=13,wrap='word');log.pack(fill='both',expand=True)
+    log=tk.Text(frame,height=9,wrap='word');log.pack(fill='both',expand=True)
     ttk.Label(frame,text='Geometria preparada fica em '+str(cache)+' | Linhas ocultas entre objetos são mantidas.',
               wraplength=810).pack(anchor='w',pady=6)
 
     def write(text):log.insert('end',text+'\n');log.see('end')
 
+    def missing_models():
+        return [item for item in state['job']['models'] if item['id'] not in state['paths']] if state['job'] else []
+
     def refresh():
         table.delete(*table.get_children())
         for item in state['job']['models']:
-            table.insert('','end',iid=item['id'],values=(item['name'],state['paths'].get(item['id'],'Escolha o IFC (duplo clique)')))
+            path=state['paths'].get(item['id'])
+            shown=f'{Path(path).name}   (pasta {Path(path).parent.name})' if path else '⚠ Não localizado: clique em "Localizar IFC…"'
+            table.insert('','end',iid=item['id'],values=(item['name'],shown),tags=() if path else ('missing',))
+        pending=missing_models()
+        target=pending[0]['id'] if pending else (state['job']['models'][0]['id'] if state['job']['models'] else None)
+        if target:table.selection_set(target);table.see(target)
+        files_status.config(text=f'Falta localizar {len(pending)} arquivo(s).' if pending else 'Todos os IFCs localizados.')
 
     def load_job(path,automatic=False):
         try:
@@ -173,11 +201,10 @@ def gui():
         write(('Configuração aberta automaticamente: ' if automatic else 'Configuração aberta: ')+str(path))
         for warning in job.get('warnings',[]):
             if warning.get('code')!='INSUFFICIENT_REFERENCES':write(warning['message'])
-        if outdated:write('Revisão nova no Trimble, escolha o IFC atualizado (duplo clique): '+', '.join(outdated))
-        if ambiguous:write('Nomes repetidos em pastas diferentes, escolha por duplo clique: '+', '.join(ambiguous))
+        if outdated:write('Revisão nova no Trimble: localize o IFC atualizado de '+', '.join(outdated)+'.')
+        if ambiguous:write('Há mais de um arquivo com o mesmo nome em pastas diferentes: localize o certo de '+', '.join(ambiguous)+'.')
         missing=[item['name'] for item in job['models'] if item['id'] not in paths]
-        if missing and not settings.get('folder'):write('Clique em "Escolher pasta de IFCs" para localizar os arquivos.')
-        elif missing:write('Sem IFC local para: '+', '.join(missing)+'. Dê duplo clique na linha para escolher.')
+        if missing:write('Ao clicar em "Gerar DXF", o auxiliar vai perguntar onde está: '+', '.join(missing)+'.')
         pending=needs_confirmation(job)
         confirm.set(False)
         if pending:
@@ -198,30 +225,36 @@ def gui():
 
     def choose_folder():
         if not state['job']:return messagebox.showinfo('Configuração','Exporte a configuração no painel do Trimble primeiro.')
-        folder=filedialog.askdirectory(title='Pasta dos IFCs',initialdir=settings.get('folder') or str(Path.home()))
+        folder=filedialog.askdirectory(title='Pasta onde ficam os IFCs',initialdir=settings.get('folder') or str(Path.home()))
         if not folder:return
         settings['folder']=folder;save_settings(settings)
         matches,ambiguous=match_folder(folder,state['job']['models'])
         state['paths'].update(matches)
         write(f'{len(matches)} IFC(s) encontrado(s) em {folder}.')
-        if ambiguous:write('Nomes repetidos em pastas diferentes, escolha por duplo clique: '+', '.join(ambiguous))
+        if ambiguous:write('Há mais de um arquivo com o mesmo nome: localize o certo de '+', '.join(ambiguous)+'.')
         refresh()
 
-    def choose_file(event=None):
-        selected=table.selection()
-        if not selected or state['process']:return
-        item=next(model for model in state['job']['models'] if model['id']==selected[0])
+    def choose_file(event=None,item=None):
+        """Pergunta onde está o IFC de um modelo. Retorna True se um arquivo foi escolhido."""
+        if not state['job'] or state['process']:return False
+        if item is None:
+            selected=table.selection()
+            if not selected:return False
+            item=next(model for model in state['job']['models'] if model['id']==selected[0])
         current=state['paths'].get(item['id'])
-        path=filedialog.askopenfilename(title='Escolher IFC de '+item['name'],filetypes=[('IFC','*.ifc')],
+        path=filedialog.askopenfilename(title=f'Onde está o IFC "{item["name"]}"?',filetypes=[('IFC','*.ifc')],
                                         initialdir=str(Path(current).parent) if current else settings.get('folder'))
-        if not path:return
-        state['paths'][item['id']]=path
-        remember_file(settings,item,path);save_settings(settings)
+        if not path:return False
+        found=adopt_choice(settings,state['job']['models'],state['paths'],item,path);save_settings(settings)
+        if found:write(f'Também encontrado(s) na mesma pasta: {len(found)} IFC(s).')
         refresh()
+        return True
 
     table.bind('<Double-1>',choose_file)
-    ttk.Button(header,text='Escolher pasta de IFCs',command=choose_folder).pack(side='left',padx=(0,8))
-    ttk.Button(header,text='Abrir outra configuração…',command=open_other).pack(side='left')
+    ttk.Button(files_bar,text='Localizar IFC…',command=choose_file).pack(side='left',padx=(0,8))
+    ttk.Button(files_bar,text='Procurar todos numa pasta…',command=choose_folder).pack(side='left',padx=(0,8))
+    ttk.Button(files_bar,text='Abrir outra configuração…',command=open_other).pack(side='left',padx=(0,12))
+    files_status=ttk.Label(files_bar,text='');files_status.pack(side='left')
 
     def finished(code,temp):
         state['process']=None;generate.config(state='normal');cancel.config(state='disabled');check.config(state='normal')
@@ -234,9 +267,18 @@ def gui():
     def start():
         if state['process']:return
         if not state['job']:return messagebox.showinfo('Configuração','Exporte a configuração no painel do Trimble primeiro.')
-        if not state['paths']:return messagebox.showinfo('IFCs','Escolha a pasta dos IFCs ou dê duplo clique em cada modelo.')
-        missing=len(state['job']['models'])-len(state['paths'])
-        if missing and not messagebox.askyesno('Arquivos ausentes',f'{missing} modelo(s) sem arquivo local. Gerar DXF parcial com os demais?'):return
+        # Pergunta, um por vez, pelos IFCs que ainda faltam. Escolher um arquivo pode
+        # encontrar os outros na mesma pasta, por isso a lista é recalculada.
+        skipped=set()
+        while True:
+            pending=[item for item in missing_models() if item['id'] not in skipped]
+            if not pending:break
+            item=pending[0]
+            table.selection_set(item['id']);table.see(item['id'])
+            if choose_file(item=item):continue
+            if not messagebox.askyesno('IFC não localizado',f'Gerar o DXF sem o modelo "{item["name"]}"?'):return
+            skipped.add(item['id'])
+        if not state['paths']:return messagebox.showinfo('IFCs','Nenhum IFC localizado: não há o que desenhar.')
         state['output']=default_output(state['job_path'])
         temp=tempfile.TemporaryDirectory(prefix='corte-dxf-')
         folder=Path(temp.name)
@@ -261,7 +303,8 @@ def gui():
         if state['saved'] and Path(state['saved']).exists():
             subprocess.Popen(f'explorer /select,"{state["saved"]}"')
 
-    generate=ttk.Button(actions,text='Gerar DXF',command=start);generate.pack(side='left',padx=(0,8))
+    ttk.Style().configure('Primary.TButton',font=('Segoe UI',11,'bold'),padding=(18,8))
+    generate=ttk.Button(actions,text='Gerar DXF',command=start,style='Primary.TButton');generate.pack(side='left',padx=(0,12))
     cancel=ttk.Button(actions,text='Cancelar',command=stop,state='disabled');cancel.pack(side='left',padx=(0,8))
     open_folder=ttk.Button(actions,text='Mostrar DXF na pasta',command=show_output,state='disabled');open_folder.pack(side='left')
 
