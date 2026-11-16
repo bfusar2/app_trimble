@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Coordenadas CSV – Interalli</title>
+  <link rel="icon" href="icon.svg" />
+  <link rel="stylesheet" href="../style.css?v=9" />
+  <link rel="stylesheet" href="app.css?v=1" />
+  <!-- Workspace API oficial da Trimble (ponte entre o iframe e o Trimble Connect) -->
+  <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
+</head>
+<body>
+  <header>
+    <h1>Coordenadas CSV <small id="version" class="hint"></small></h1>
+    <span id="status" class="badge">Conectando…</span>
+  </header>
+
+  <main id="app">
+    <p id="local-note" class="note" hidden>
+      <strong>Modo local:</strong> fora do Trimble Connect o visualizador é simulado.
+      Ative a marcação e use <em>Simular clique</em> para criar pontos de teste.
+    </p>
+
+    <section>
+      <h2>1. Marcar pontos</h2>
+      <button id="btn-capture" class="primary">Marcar pontos no modelo</button>
+      <p id="simulate" hidden><button id="btn-simulate" class="secondary small">Simular clique</button></p>
+      <p class="hint">Clique nos pontos do modelo. Pontos feitos em <strong>Medir → Ponto</strong> também
+        entram na lista, numerados P1, P2… na ordem em que foram criados.</p>
+    </section>
+
+    <section>
+      <h2>2. Pontos <span id="count"></span></h2>
+      <div class="actions">
+        <button id="btn-mid" class="secondary small" disabled>Ponto médio</button>
+        <button id="btn-renumber" class="secondary small" disabled>Renumerar</button>
+        <button id="btn-refresh" class="secondary small">Atualizar</button>
+        <button id="btn-clear" class="secondary small danger" disabled>Apagar todos</button>
+      </div>
+      <p class="hint">Ponto médio: marque 2 pontos na lista, ou nenhum para usar os 2 últimos.
+        O ponto médio também é marcado no modelo.</p>
+      <ol id="point-list"></ol>
+      <p id="empty" class="hint">Nenhum ponto ainda.</p>
+      <label class="check"><input id="opt-labels" type="checkbox" checked /> Mostrar os nomes (P1, P2…) no modelo</label>
+    </section>
+
+    <section>
+      <h2>3. Exportar CSV</h2>
+      <label class="inline">Formato
+        <select id="opt-format">
+          <option value="br" selected>Excel pt-BR (; e vírgula decimal)</option>
+          <option value="intl">CAD / topografia (, e ponto decimal)</option>
+        </select>
+      </label>
+      <label class="check"><input id="opt-header" type="checkbox" checked /> Incluir cabeçalho</label>
+      <p class="hint">Colunas: Ponto, X, Y, Z (em metros, 3 casas) e Descrição.</p>
+      <button id="btn-export" class="primary" disabled>Exportar CSV</button>
+      <p id="download"></p>
+    </section>
+
+    <section>
+      <h2>4. Importar e localizar no modelo</h2>
+      <label class="file">
+        Importar CSV de pontos
+        <input id="file" type="file" accept=".csv,.txt,text/csv" />
+      </label>
+      <p class="hint">Mesmo formato exportado: Ponto, X, Y, Z, Descrição, com <code>;</code> ou <code>,</code>.
+        Também aceita cabeçalhos E/N/Cota em qualquer ordem. Os pontos aparecem em verde no modelo.</p>
+      <details>
+        <summary>Marcar uma coordenada digitada</summary>
+        <div class="grid4">
+          <label>Nome <input id="m-name" placeholder="auto" spellcheck="false" /></label>
+          <label>X (m) <input id="m-x" inputmode="decimal" /></label>
+          <label>Y (m) <input id="m-y" inputmode="decimal" /></label>
+          <label>Z (m) <input id="m-z" inputmode="decimal" /></label>
+        </div>
+        <button id="btn-manual" class="secondary small">Marcar no modelo</button>
+      </details>
+    </section>
+
+    <p id="progress" class="hint" role="status" aria-live="polite"></p>
+  </main>
+
+  <details id="log-box">
+    <summary>Log</summary>
+    <button id="btn-download-log" class="secondary small">Baixar Log</button>
+    <pre id="log"></pre>
+  </details>
+
+  <!-- Ao publicar uma versão nova, aumente o número abaixo -->
+  <script type="module" src="app.js?v=1"></script>
+</body>
+</html>

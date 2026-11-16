@@ -1,0 +1,8 @@
+{
+  "title": "Coordenadas CSV",
+  "description": "Numera pontos marcados no Visualizador 3D, cria pontos médios e exporta ou importa coordenadas em CSV",
+  "icon": "https://bfusar2.github.io/app_trimble/coordenadas/icon.svg",
+  "url": "https://bfusar2.github.io/app_trimble/coordenadas/index.html",
+  "infoUrl": "https://github.com/bfusar2/app_trimble/tree/main/coordenadas#readme",
+  "extensionType": ["3dviewer"]
+}

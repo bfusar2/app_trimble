@@ -4,6 +4,10 @@ Gera um **DXF** a partir do plano de corte (**tesoura**) do Visualizador 3D do
 Trimble Connect for Browser. Cada tipo de elemento vira uma camada
 (`IFCWALL`, `IFCSLAB`, `IFCCOLUMN`, …) com cor própria.
 
+> Também neste repositório: **[Coordenadas CSV](coordenadas/README.md)**, extensão separada que
+> numera pontos marcados no modelo, cria pontos médios e exporta/importa coordenadas em CSV.
+> Manifesto: `https://bfusar2.github.io/app_trimble/coordenadas/manifest.json`.
+
 ## Como funciona
 
 Para modelos que excedem a capacidade do navegador, a versão 9 também exporta

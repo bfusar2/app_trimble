@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="pt-BR">
+<head><meta charset="utf-8" /><title>Testes – Coordenadas CSV</title>
+<style>body{font:14px system-ui;padding:16px;background:#fff;color:#222}.ok{color:#1e8a44}.falha{color:#c81922;font-weight:600}</style></head>
+<body>
+  <h1>Testes – Coordenadas CSV</h1>
+  <p id="resumo"></p>
+  <ul id="out"></ul>
+  <script type="module">
+    import { buildCsv, parseCsv, parseNumber, midpoint, distance, nextPointNumber, csvFileName, splitCsvLine } from "../coordenadas/points.js";
+
+    const results = [];
+    const check = (nome, cond, detalhe = "") => results.push({ nome, ok: !!cond, detalhe });
+    const near = (a, b, tol = 1e-9) => Math.abs(a - b) <= tol;
+
+    // ---------- números ----------
+    check("Número com vírgula decimal", parseNumber("734810,41") === 734810.41);
+    check("Número com ponto decimal", parseNumber("734810.41") === 734810.41);
+    check("Milhar brasileiro", parseNumber("7.527.201,64") === 7527201.64);
+    check("Milhar internacional", parseNumber("7,527,201.64") === 7527201.64);
+    check("Negativo", parseNumber("-12,5") === -12.5);
+    check("Inteiro", parseNumber("445") === 445);
+    check("Texto não é número", Number.isNaN(parseNumber("X (m)")));
+    check("Vazio não é número", Number.isNaN(parseNumber("")));
+    check("Vírgulas ambíguas não são número", Number.isNaN(parseNumber("1,234,567")));
+
+    // ---------- nomes e ponto médio ----------
+    check("Próximo número vazio", nextPointNumber([]) === 1);
+    check("Próximo número com lacuna", nextPointNumber(["P1", "P7", "P3"]) === 8);
+    check("Próximo número ignora nomes próprios", nextPointNumber(["PV-01", "Pilar", "p2"]) === 3);
+    const a = { x: 734810.41, y: 7527201.64, z: 445.95 }, b = { x: 734812.41, y: 7527205.64, z: 447.95 };
+    const m = midpoint(a, b);
+    check("Ponto médio", near(m.x, 734811.41, 1e-6) && near(m.y, 7527203.64, 1e-6) && near(m.z, 446.95, 1e-6), JSON.stringify(m));
+    check("Distância", near(distance(a, b), Math.hypot(2, 4, 2), 1e-9));
+
+    // ---------- CSV: exportação ----------
+    const pts = [
+      { name: "P1", x: 734810.41, y: 7527201.64, z: 445.95, desc: "" },
+      { name: "P2", x: 734812.4106, y: 7527205.6449, z: 447.9504, desc: "Pilar C8; eixo \"A\"" },
+      { name: "P3", ...m, desc: "Médio de P1 e P2" },
+    ];
+    const br = buildCsv(pts);
+    const brLines = br.replace(/^﻿/, "").trim().split("\r\n");
+    check("BR começa com BOM (acentos no Excel)", br.startsWith("﻿"));
+    check("BR cabeçalho", brLines[0] === "Ponto;X (m);Y (m);Z (m);Descrição", brLines[0]);
+    check("BR linha P1", brLines[1] === "P1;734810,410;7527201,640;445,950;", brLines[1]);
+    check("BR arredonda em mm", brLines[2].startsWith("P2;734812,411;7527205,645;447,950;"), brLines[2]);
+    check("BR protege ; e aspas na descrição", brLines[2].endsWith(';"Pilar C8; eixo ""A"""'), brLines[2]);
+    const intl = buildCsv(pts, { format: "intl", header: false });
+    const intlLines = intl.trim().split("\r\n");
+    check("Internacional sem BOM nem cabeçalho", !intl.startsWith("﻿") && intlLines.length === 3);
+    check("Internacional linha P1", intlLines[0] === "P1,734810.410,7527201.640,445.950,", intlLines[0]);
+    check("Internacional mantém ; sem aspas", intlLines[1].endsWith(',"Pilar C8; eixo ""A"""'), intlLines[1]);
+    check("Nome de arquivo", csvFileName(new Date(2026, 10, 16, 8, 5)) === "coordenadas_20261116_0805.csv");
+
+    // ---------- CSV: ida e volta ----------
+    for (const [nome, csv] of [["BR", br], ["internacional", intl]]) {
+      const { points, skipped } = parseCsv(csv);
+      const same = points.length === 3 && points.every((p, i) =>
+        p.name === pts[i].name && near(p.x, +pts[i].x.toFixed(3), 1e-6) && near(p.y, +pts[i].y.toFixed(3), 1e-6) &&
+        near(p.z, +pts[i].z.toFixed(3), 1e-6) && p.desc === pts[i].desc);
+      check(`Ida e volta ${nome}`, same && !skipped.length, JSON.stringify(points));
+    }
+
+    // ---------- CSV: outros arquivos ----------
+    const pnezd = parseCsv("Ponto,N,E,Cota,Descricao\n10,7527201.64,734810.41,445.95,MURO\n");
+    check("Cabeçalho N/E troca as colunas", pnezd.points[0]?.x === 734810.41 && pnezd.points[0]?.y === 7527201.64 &&
+      pnezd.points[0]?.name === "10" && pnezd.points[0]?.desc === "MURO", JSON.stringify(pnezd.points));
+    const xyz = parseCsv("734810,41;7527201,64;445,95\n734811;7527202;446\n");
+    check("Só X;Y;Z sem cabeçalho", xyz.points.length === 2 && xyz.points[0].name === null && xyz.points[1].z === 446, JSON.stringify(xyz.points));
+    const numbered = parseCsv("1 734810.41 7527201.64 445.95\n2 734811 7527202 446 canto\n");
+    check("Separado por espaços com número do ponto", numbered.points.length === 2 && numbered.points[0].name === "1" &&
+      numbered.points[1].desc === "canto", JSON.stringify(numbered.points));
+    const tab = parseCsv("Nome\tX\tY\tZ\nA\t1,5\t2,5\t3,5\n");
+    check("Separado por tabulação", tab.points[0]?.name === "A" && tab.points[0]?.x === 1.5, JSON.stringify(tab.points));
+    const bad = parseCsv("Ponto;X;Y;Z\nP1;1;2;3\nP2;abc;2;3\n\nP3;4;5;6\n");
+    check("Linha inválida é listada e as demais entram", bad.points.length === 2 && bad.skipped.length === 1 && bad.skipped[0].line === 3,
+      JSON.stringify(bad));
+    const unknownHeader = parseCsv("Codigo do ponto;Leste;Norte;Altura\nA1;1;2;3\n");
+    check("Cabeçalho desconhecido é pulado", unknownHeader.points.length === 1 && !unknownHeader.skipped.length, JSON.stringify(unknownHeader));
+    check("Aspas com separador dentro", JSON.stringify(splitCsvLine('P1;"a;b";"c ""d"""', ";")) === JSON.stringify(["P1", "a;b", 'c "d"']));
+    check("Arquivo vazio", parseCsv("").points.length === 0);
+    const commaWithSemicolon = parseCsv('P1,1.5,2.5,3.5,"a; b"\nP2,4,5,6,c\n');
+    check("Vírgula com ; na descrição", commaWithSemicolon.points.length === 2 && commaWithSemicolon.points[0].desc === "a; b",
+      JSON.stringify(commaWithSemicolon));
+    const brIntegers = parseCsv("P1;734810;7527201;445\nP2;734811;7527202;446\n");
+    check("BR com inteiros", brIntegers.points.length === 2 && brIntegers.points[1].y === 7527202, JSON.stringify(brIntegers));
+
+    // ---------- saída ----------
+    const out = document.getElementById("out");
+    for (const r of results) {
+      const li = document.createElement("li");
+      li.className = r.ok ? "ok" : "falha";
+      li.textContent = `${r.ok ? "OK" : "FALHA"} — ${r.nome}${r.ok || !r.detalhe ? "" : " · " + r.detalhe}`;
+      out.append(li);
+    }
+    const falhas = results.filter(r => !r.ok).length;
+    document.getElementById("resumo").textContent = `${results.length - falhas}/${results.length} testes passaram.`;
+    document.title = falhas ? `FALHA (${falhas})` : "OK";
+  </script>
+</body>
+</html>
