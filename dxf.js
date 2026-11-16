@@ -9,6 +9,7 @@ const KNOWN_COLORS = {
   IFCFOOTING: 8, IFCPILE: 8,
   IFCDOOR: 2, IFCWINDOW: 4,
   IFCSTAIR: 30, IFCSTAIRFLIGHT: 30, IFCRAILING: 40,
+  PONTOS: 210, PONTOS_COORD: 210, // pontos marcados no Trimble (magenta)
 };
 const FALLBACK = [10, 50, 90, 130, 170, 210, 250, 20, 60, 100, 140, 180, 220];
 
@@ -16,6 +17,8 @@ const safeLayer = (name) => String(name).replace(/[<>/\\":;?*|=,]/g, "_").slice(
 
 /**
  * layers: Map<nomeCamada, [{ points: [[x,y],...], closed }]>
+ * Itens especiais: { points: [[x,y]], text, height } → TEXT; { points: [[x,y]], point: true } → POINT;
+ * { points: [[x,y]], circle: raio } → CIRCLE.
  * units: "mm" | "m"
  */
 export function buildDxf(layers, options = {}) {
@@ -88,10 +91,18 @@ function writeDxf(layers, { units = "mm" }, g) {
     ? 0 : a[0].toUpperCase().endsWith("_VISTA") ? -1 : 1);
   for (const [rawName, lines] of ordered) {
     const layer = safeLayer(rawName);
-    for (const { points, closed, text, height } of lines) {
+    for (const { points, closed, text, height, point, circle } of lines) {
       if (text) {
         g(0, "TEXT"); g(8, layer); g(10, num(points[0][0])); g(20, num(points[0][1])); g(30, 0);
         g(40, num(height)); g(1, String(text).replace(/[\r\n]/g, " "));
+        continue;
+      }
+      if (point) {
+        g(0, "POINT"); g(8, layer); g(10, num(points[0][0])); g(20, num(points[0][1])); g(30, 0);
+        continue;
+      }
+      if (circle) {
+        g(0, "CIRCLE"); g(8, layer); g(10, num(points[0][0])); g(20, num(points[0][1])); g(30, 0); g(40, num(circle));
         continue;
       }
       if (points.length < 2) continue;

@@ -14,6 +14,7 @@ const [
   { fitAlignment },
   { expandIfcGuid, canonGuid },
   { buildTrimbleJob },
+  { readMarkedPoints, markedPointLayers },
 ] = await Promise.all([
   import(`./ifc-client.js${V}`),
   import(`./model-source.js${V}`),
@@ -22,6 +23,7 @@ const [
   import(`./align.js${V}`),
   import(`./guid.js${V}`),
   import(`./trimble-job.js${V}`),
+  import(`./coordenadas/marked.js${V}`),
 ]);
 
 // Erro médio máximo aceito no alinhamento (m). Acima disso o corte não é exportado.
@@ -103,6 +105,7 @@ async function init() {
     $("manual-plane").hidden = false;
     $("btn-refresh").hidden = true;
     $("local-processing").hidden = true;
+    $("points-option").hidden = true; // sem Trimble não há pontos marcados
     $("planes").innerHTML = '<p class="hint">Fora do Trimble Connect: informe o plano abaixo.</p>';
     renderModels();
     return;
@@ -466,6 +469,7 @@ async function generate() {
       direction: $("opt-depth-reverse").checked ? 1 : -1,
       grid: $("opt-grid").checked, hatching: $("opt-hatch").checked,
     };
+    const includePoints = EMBEDDED && $("opt-points").checked;
     if (!$("opt-depth").value.trim() || !Number.isFinite(opts.depth) || opts.depth < 0) {
       throw new Error("Informe uma profundidade em metros, maior ou igual a zero.");
     }
@@ -515,6 +519,7 @@ async function generate() {
     }
     log("Lote", { arquivos: jobs.length });
     const layers = new Map();
+    let pointFrame = null; // plano e alinhamento do 1º IFC processado, usados nos pontos marcados
     const skipped = [];
     let completed = 0;
     let total = 0, sectionTotal = 0, viewTotal = 0, unverified = false;
@@ -536,8 +541,8 @@ async function generate() {
         buffer = null; // o ArrayBuffer foi transferido para o worker
         stage = "alinhamento";
         let planeIfc = manualPlane;
+        let calib = null;
         if (EMBEDDED) {
-          let calib = null;
           if (job.modelId) {
             try {
               calib = await withAbort(calibrate(job.modelId, run.session, signal), signal);
@@ -559,6 +564,7 @@ async function generate() {
         progress(`[${index + 1}/${jobs.length}] Gerando corte de ${job.label}…`);
         const plane = makeSectionPlane(planeIfc.point, planeIfc.normal, { mirror: opts.mirror });
         result = await run.session.cut(plane, { ...opts, scale, filterGuids: job.filterGuids || null });
+        pointFrame ??= { plane, calib, label: job.label };
       } catch (err) {
         if (signal.aborted) throw err;
         const reason = /aborted|memory|out of bounds|unreachable|WebAssembly/i.test(err?.message || "")
@@ -601,6 +607,34 @@ async function generate() {
         ? "Nenhum contorno encontrado nessa profundidade. Aumente a distância ou inverta o sentido da profundidade."
         : "O plano não cortou nenhum elemento. Confira a posição da tesoura.");
     }
+    let pointCount = 0, pointsFailed = false;
+    if (includePoints && pointFrame && !API.markup?.getSinglePointMarkups) {
+      log("Pontos marcados: esta versão do Trimble Connect não oferece as marcações pela API.");
+    } else if (includePoints && pointFrame) {
+      stage = "pontos marcados";
+      try {
+        const marked = await withAbort(readMarkedPoints(API, project?.id), signal);
+        if (marked.length) {
+          // Mesmo caminho do plano da tesoura: visualizador (m) -> unidade das caixas -> IFC (m).
+          const { plane, calib } = pointFrame;
+          const toIfc = calib ? p => calib.toIfcPoint(p.map(v => v * calib.s)) : p => p;
+          for (const [name, lines] of markedPointLayers(marked, { plane, toIfc, scale })) layers.set(name, lines);
+          pointCount = marked.length;
+          log("Pontos marcados no DXF", {
+            referencia: pointFrame.label, alinhado: !!calib,
+            pontos: marked.map(p => {
+              const w = toIfc([p.x, p.y, p.z]);
+              const d = (w[0] - plane.point[0]) * plane.normal[0] + (w[1] - plane.point[1]) * plane.normal[1] + (w[2] - plane.point[2]) * plane.normal[2];
+              return { nome: p.name, m: [p.x, p.y, p.z], distanciaDoPlano_m: +d.toFixed(3) };
+            }),
+          });
+        }
+      } catch (err) {
+        if (signal.aborted) throw err;
+        pointsFailed = true;
+        log("Pontos marcados não incluídos", String(err?.message || err));
+      }
+    }
     progress("Montando DXF…");
     await nextFrame();
     signal.throwIfAborted();
@@ -610,6 +644,8 @@ async function generate() {
     const name = `corte_${skipped.length ? 'parcial_' : ''}${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "")}.dxf`;
     offerDownload(dxf, name);
     progress(`Pronto: ${completed} arquivo(s), ${total} elemento(s), ${sectionTotal} no plano, ${viewTotal} em vista, ${layerCount} camada(s).` +
+      (pointCount ? ` ${pointCount} ponto(s) marcado(s) na camada PONTOS.` : "") +
+      (pointsFailed ? " Os pontos marcados não entraram; veja o Log." : "") +
       (skipped.length ? ` DXF parcial: ${skipped.length} IFC(s) ignorado(s), listados abaixo.` : "") +
       (unverified ? " Atenção: alinhamento não verificado, confira as coordenadas no CAD." : ""));
   } catch (err) {

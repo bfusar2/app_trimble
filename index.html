@@ -58,6 +58,11 @@
       <label class="check"><input id="opt-hatch" type="checkbox" checked /> Hachurar peças cortadas</label>
       <label class="check"><input id="opt-selected" type="checkbox" /> Só objetos selecionados</label>
       <label class="check"><input id="opt-mirror" type="checkbox" /> Espelhar horizontalmente</label>
+      <div id="points-option">
+        <label class="check"><input id="opt-points" type="checkbox" checked /> Incluir pontos marcados (P1, P2…)</label>
+        <p class="hint">Os pontos de Medir → Ponto e do app Coordenadas CSV entram na camada PONTOS (marca e nome)
+          e na PONTOS_COORD (coordenadas do Trimble), projetados no plano do corte. Ainda não entram no Corte DXF Local.</p>
+      </div>
       <label class="inline">Unidade do DXF
         <select id="opt-units">
           <option value="mm" selected>milímetros</option>
@@ -99,6 +104,6 @@
   </details>
 
   <!-- Ao publicar uma versão nova, aumente o número abaixo -->
-  <script type="module" src="app.js?v=10"></script>
+  <script type="module" src="app.js?v=11"></script>
 </body>
 </html>

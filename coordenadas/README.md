@@ -43,6 +43,12 @@ P3;734812,410;7527202,640;445,950;Médio de P1 e P2
 Linhas sem X, Y e Z numéricos são ignoradas e listadas no Log. Para uma coordenada só,
 use **Marcar uma coordenada digitada**.
 
+### No DXF do Corte DXF
+
+O [Corte DXF](../README.md#pontos-marcados) desenha os mesmos pontos no corte (camadas `PONTOS`
+e `PONTOS_COORD`), com os nomes e descrições daqui, desde que os dois painéis sejam abertos na
+mesma aba do navegador. Sem isso, o Corte DXF numera P1, P2… na ordem de criação.
+
 ### Nomes no modelo
 
 Com **Mostrar os nomes no modelo**, cada ponto ganha uma marcação de texto com o nome (P1, P2…).
@@ -66,6 +72,7 @@ Nada sai do navegador do usuário: não existe servidor próprio.
 | `index.html`, `app.css`, `icon.svg` | Tela da extensão (usa também o `../style.css`) |
 | `app.js` | Integração com o Trimble Connect, lista, ponto médio, exportar e importar |
 | `points.js` | CSV (gerar e ler), números, nomes e ponto médio, sem dependência do Trimble |
+| `marked.js` | Leitura dos pontos com os nomes da sessão e desenho no DXF (usado também pelo Corte DXF) |
 | `mock-viewer.js` | Visualizador simulado para o modo local |
 | `manifest.json` | Registro da extensão no Trimble Connect |
 | `../test/coordenadas.html` | Testes do CSV e dos cálculos |

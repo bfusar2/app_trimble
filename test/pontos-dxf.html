@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><title>Teste: pontos marcados no DXF</title>
+<style>body{font:14px system-ui;padding:16px;background:#fff;color:#222}</style></head>
+<body><h1>Pontos marcados no Corte DXF</h1><pre id="out">Rodando…</pre><iframe id="app" style="width:420px;height:850px"></iframe>
+<script type="module">
+import { openIfc, sampleBoxes } from "../ifc.js";
+import { canonGuid } from "../guid.js";
+
+const results = [];
+const check = (nome, ok, detalhe = "") => { results.push({ nome, ok: !!ok, detalhe }); show(); };
+function show() {
+  document.getElementById("out").textContent = results.map(r => `${r.ok ? "OK" : "FALHA"} — ${r.nome}${r.ok || !r.detalhe ? "" : " · " + r.detalhe}`).join("\n");
+}
+
+// Caixas reais do IFC de teste; o "visualizador" as mostra deslocadas de T (m), como num modelo georreferenciado.
+const buffer = await (await fetch("teste.ifc")).arrayBuffer();
+const boxes = new Map(sampleBoxes(await openIfc(buffer.slice(0)), 40).map(b => [canonGuid(b.guid), b]));
+const T = [1000, 2000, 0];
+const mm = (x, y, z) => ({ positionX: x * 1000, positionY: y * 1000, positionZ: z * 1000 });
+let aligned = true, markupError = false, requested = [];
+let markups = [
+  { id: 3, start: mm(1001.5, 2002.25, 1.5) }, // IFC (1,5; 2,25; 1,5): no plano
+  { id: 4, start: mm(1001, 2001, 0.5) },      // 1 m abaixo do plano
+];
+window.fakeAPI = {
+  project: { getCurrentProject: async () => ({ id: "test", name: "Teste", location: "northAmerica" }) },
+  extension: { requestPermission: async () => "x".repeat(40) },
+  markup: { getSinglePointMarkups: async () => { if (markupError) throw new Error("falha simulada"); return markups; } },
+  viewer: {
+    getModels: async () => [{ id: "a", name: "a.ifc", versionId: "1" }],
+    getSectionPlanes: async () => [{ id: "plane", positionX: 0, positionY: 0, positionZ: 1500, directionX: 0, directionY: 0, directionZ: 1 }],
+    getLoadedModel: async id => ({ id, versionId: "1", blob: new Blob([buffer]) }),
+    convertToObjectRuntimeIds: async (id, guids) => { requested = guids; return guids.map((g, i) => (boxes.has(canonGuid(g)) ? i + 1 : null)); },
+    getObjectBoundingBoxes: async (id, rids) => !aligned ? [] : rids.map(r => {
+      const b = boxes.get(canonGuid(requested[r - 1]));
+      return { id: r, boundingBox: { min: b.min.map((v, k) => v + T[k]), max: b.max.map((v, k) => v + T[k]) } };
+    }),
+    getSelection: async () => [],
+  },
+};
+window.fakeMetadata = url => new Response(JSON.stringify({ id: "a", versionId: "1", size: buffer.byteLength }), { headers: { "Content-Type": "application/json" } });
+
+// Nome dado no Coordenadas CSV (mesma sessão do navegador).
+sessionStorage.setItem("coordcsv:test", JSON.stringify([{ id: 3, name: "Pilar C8", desc: "topo", x: 1001.5, y: 2002.25, z: 1.5 }]));
+
+const html = await (await fetch("../index.html")).text();
+const stub = `<script>
+window.TrimbleConnectWorkspace={connect:async(parent,onEvent)=>parent.fakeAPI};
+const originalFetch=window.fetch.bind(window);
+window.fetch=(url,options)=>String(url).includes('/tc/api/2.0/files/')?Promise.resolve(parent.fakeMetadata(url)):originalFetch(url,options);
+HTMLAnchorElement.prototype.click=function(){window.lastDownload={name:this.download,url:this.href};};
+<\/script>`;
+const frame = document.getElementById("app");
+frame.srcdoc = html.replace("<head>", `<head><base href="${new URL("../", location.href)}">`)
+  .replace(/<script src="https:\/\/components[^>]+><\/script>/, stub);
+const until = async test => { for (let i = 0; i < 1200; i++) { if (test()) return; await new Promise(r => setTimeout(r, 50)); } throw Error("Tempo de espera esgotado"); };
+
+// Lê as entidades do DXF: [{ type, layer, x, y, text }]
+function entities(dxf) {
+  const lines = dxf.split("\r\n");
+  const start = lines.indexOf("ENTITIES");
+  const out = [];
+  let cur = null;
+  for (let i = start + 1; i + 1 < lines.length; i += 2) {
+    const code = lines[i].trim(), value = lines[i + 1];
+    if (code === "0") { if (value === "ENDSEC") break; cur = { type: value }; out.push(cur); }
+    else if (cur && code === "8") cur.layer = value;
+    else if (cur && code === "10") cur.x = Number(value);
+    else if (cur && code === "20") cur.y = Number(value);
+    else if (cur && code === "1") cur.text = value;
+    else if (cur && code === "40") cur.h = Number(value);
+  }
+  return out;
+}
+
+let doc;
+const progress = () => doc.getElementById("progress").textContent;
+async function generate() {
+  const before = frame.contentWindow.lastDownload?.url;
+  doc.getElementById("btn-generate").click();
+  await until(() => !doc.getElementById("btn-generate").disabled);
+  const download = frame.contentWindow.lastDownload;
+  if (!download || download.url === before) throw new Error("DXF não gerado: " + progress());
+  return entities(await (await fetch(download.url)).text());
+}
+const near = (a, b, tol = 0.01) => Math.abs(a - b) <= tol;
+
+try {
+  await until(() => frame.contentDocument?.getElementById("models")?.querySelectorAll("input").length === 1);
+  doc = frame.contentDocument;
+  check("Opção de pontos aparece marcada no Trimble", !doc.getElementById("points-option").hidden && doc.getElementById("opt-points").checked);
+
+  let ents = await generate();
+  const pts = ents.filter(e => e.type === "POINT" && e.layer === "PONTOS");
+  check("Alinhado: progresso informa os 2 pontos", progress().includes("2 ponto(s) marcado(s) na camada PONTOS"), progress());
+  check("Alinhado: ponto volta ao espaço do IFC (1500; 2250 mm)", pts.length === 2 && near(pts[0].x, 1500) && near(pts[0].y, 2250), JSON.stringify(pts));
+  check("Alinhado: ponto abaixo do plano também entra, projetado", near(pts[1].x, 1000) && near(pts[1].y, 1000), JSON.stringify(pts[1]));
+  const texts = ents.filter(e => e.type === "TEXT").map(e => `${e.layer}:${e.text}`);
+  check("Nome e descrição do Coordenadas CSV", texts.includes("PONTOS:Pilar C8 - topo"), texts.join(" | "));
+  check("Ponto sem nome salvo recebe P1", texts.includes("PONTOS:P1"), texts.join(" | "));
+  check("Coordenadas do Trimble em PONTOS_COORD", texts.includes("PONTOS_COORD:X 1001,500  Y 2002,250  Z 1,500"), texts.join(" | "));
+  check("Círculo e X em volta de cada ponto", ents.filter(e => e.type === "CIRCLE" && e.layer === "PONTOS").length === 2 &&
+    ents.filter(e => e.type === "LINE" && e.layer === "PONTOS").length === 4);
+  check("Corte do IFC continua no DXF", ents.some(e => e.layer && !e.layer.startsWith("PONTOS") && e.layer !== "EIXOS"));
+  const log = doc.getElementById("log").textContent;
+  check("Log registra alinhamento e distância ao plano", log.includes('"alinhado":true') && log.includes('"distanciaDoPlano_m":-1'), log.slice(0, 400));
+
+  doc.getElementById("opt-units").value = "m";
+  ents = await generate();
+  const inMeters = ents.find(e => e.type === "POINT");
+  check("DXF em metros: ponto em (1,5; 2,25) e texto proporcional", near(inMeters.x, 1.5, 1e-6) && near(inMeters.y, 2.25, 1e-6) &&
+    near(ents.find(e => e.text === "P1").h, 0.2, 1e-6), JSON.stringify(inMeters));
+  doc.getElementById("opt-units").value = "mm";
+
+  aligned = false;
+  ents = await generate();
+  const raw = ents.find(e => e.type === "POINT");
+  check("Sem alinhamento: usa as coordenadas do Trimble, como o plano", near(raw.x, 1001500) && near(raw.y, 2002250), JSON.stringify(raw));
+  aligned = true;
+
+  doc.getElementById("opt-points").click();
+  ents = await generate();
+  check("Opção desmarcada: DXF sem pontos", !ents.some(e => e.layer?.startsWith("PONTOS")) && !progress().includes("ponto(s) marcado"));
+  doc.getElementById("opt-points").click();
+
+  markupError = true;
+  ents = await generate();
+  check("Falha ao ler pontos não impede o DXF", !ents.some(e => e.layer?.startsWith("PONTOS")) && progress().includes("Os pontos marcados não entraram"), progress());
+  markupError = false;
+
+  markups = [];
+  ents = await generate();
+  check("Sem pontos marcados: DXF normal, sem aviso", !ents.some(e => e.layer?.startsWith("PONTOS")) && !progress().includes("ponto(s) marcado") && !progress().includes("não entraram"), progress());
+} catch (error) { check(error.stack || String(error), false); }
+sessionStorage.removeItem("coordcsv:test");
+const falhas = results.filter(r => !r.ok).length;
+document.title = falhas ? `FALHA (${falhas})` : "OK";
+window.__result = { total: results.length, falhas: results.filter(r => !r.ok) };
+show();
+</script></body></html>

@@ -38,6 +38,20 @@ os IFCs omitidos. Se nenhum arquivo funcionar, não há DXF para baixar. O botã
 **Baixar Log** salva os detalhes completos, incluindo a etapa e, quando disponível,
 o elemento IFC que interrompeu a leitura.
 
+### Pontos marcados
+
+Com **Incluir pontos marcados** (ligado por padrão), os pontos de **Medir → Ponto** e do
+[Coordenadas CSV](coordenadas/README.md) entram no DXF:
+
+- camada `PONTOS`: um `POINT` (encaixe *nó* do CAD), círculo com X e o nome, com a descrição
+  quando houver (ex.: `Pilar C8 - topo`). Os nomes são os do Coordenadas CSV quando ele foi
+  aberto na mesma aba; os demais pontos recebem P1, P2… na ordem de criação;
+- camada `PONTOS_COORD`: as coordenadas do Trimble em metros (`X 734810,410  Y 7527201,640  Z 445,950`).
+
+Os pontos usam o mesmo alinhamento do plano da tesoura (o do 1º IFC processado) e são projetados
+no plano do corte: todos entram, mesmo fora da faixa de profundidade. O **Log** mostra a distância
+de cada ponto ao plano. Os pontos ainda não entram no **Corte DXF Local**.
+
 ### Por que DXF e não DWG?
 DWG é um formato fechado da Autodesk e não existe gerador gratuito que rode no navegador.
 O DXF abre direto no AutoCAD, BricsCAD, ZWCAD, QCAD etc. Para ter DWG:
@@ -100,6 +114,9 @@ Com o servidor local rodando, abra no navegador:
 - `test/teste.html` — corte completo do IFC de exemplo.
 - `test/profundidade.html` — geometria da vista, limites de profundidade, sentido e projeção;
 - `test/profundidade-ifc.html` — corte e vista com IFC real, seleção e DXF, com comparação visual.
+- `test/lote.html` — vários IFCs, cache, cancelamento e falhas, com o Trimble simulado;
+- `test/pontos-dxf.html` — pontos marcados no DXF (com e sem alinhamento, em mm e m, nomes do Coordenadas CSV);
+- `test/coordenadas.html` — CSV, nomes e desenho dos pontos do Coordenadas CSV.
 
 ## Alinhamento
 

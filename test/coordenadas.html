@@ -8,6 +8,9 @@
   <ul id="out"></ul>
   <script type="module">
     import { buildCsv, parseCsv, parseNumber, midpoint, distance, nextPointNumber, csvFileName, splitCsvLine } from "../coordenadas/points.js";
+    import { readMarkedPoints, markedPointLayers, sessionKey } from "../coordenadas/marked.js";
+    import { makeSectionPlane } from "../section.js";
+    import { buildDxf } from "../dxf.js";
 
     const results = [];
     const check = (nome, cond, detalhe = "") => results.push({ nome, ok: !!cond, detalhe });
@@ -85,6 +88,46 @@
       JSON.stringify(commaWithSemicolon));
     const brIntegers = parseCsv("P1;734810;7527201;445\nP2;734811;7527202;446\n");
     check("BR com inteiros", brIntegers.points.length === 2 && brIntegers.points[1].y === 7527202, JSON.stringify(brIntegers));
+
+    // ---------- pontos marcados: nomes da sessão ----------
+    const mm = (x, y, z) => ({ positionX: x * 1000, positionY: y * 1000, positionZ: z * 1000 });
+    const fakeApi = { markup: { getSinglePointMarkups: async () => [
+      { id: 12, start: mm(10, 20, 3) }, { id: 5, start: mm(1, 2, 3) }, { id: 9, start: mm(4, 5, 6) }, { id: 7 },
+    ] } };
+    sessionStorage.setItem(sessionKey("teste-pontos"), JSON.stringify([
+      { id: 9, name: "Pilar C8", desc: "topo", x: 4, y: 5, z: 6 },
+      { id: 12, name: "P4", desc: "", x: 99, y: 99, z: 99 }, // mesmo id, outra posição: não vale
+    ]));
+    const marked = await readMarkedPoints(fakeApi, "teste-pontos");
+    sessionStorage.removeItem(sessionKey("teste-pontos"));
+    check("Pontos na ordem de criação, sem marcação inválida", marked.map(p => p.id).join() === "5,9,12", JSON.stringify(marked));
+    check("Nome e descrição vêm do Coordenadas CSV", marked[1].name === "Pilar C8" && marked[1].desc === "topo");
+    check("Demais pontos recebem P1, P2…", marked[0].name === "P1" && marked[2].name === "P2", marked.map(p => p.name).join());
+    check("Coordenadas em metros", marked[2].x === 10 && marked[2].y === 20 && marked[2].z === 3);
+    const noSession = await readMarkedPoints(fakeApi, "outro-projeto");
+    check("Sem sessão: P1, P2, P3", noSession.map(p => p.name).join() === "P1,P2,P3");
+
+    // ---------- pontos marcados: desenho no DXF ----------
+    const planta = makeSectionPlane([0, 0, 1.5], [0, 0, 1]);
+    const mpts = [{ name: "P1", desc: "", x: 734810.41, y: 7527201.64, z: 445.95 }, { name: "P2", desc: "eixo A", x: 1, y: 2, z: 3 }];
+    const pl = markedPointLayers(mpts, { plane: planta, scale: 1000 });
+    const pointItem = pl.get("PONTOS").find(i => i.point);
+    check("Planta: ponto em X, Y × escala", near(pointItem.points[0][0], 734810410, 1e-3) && near(pointItem.points[0][1], 7527201640, 1e-3),
+      JSON.stringify(pointItem));
+    check("Marca: POINT, círculo, X e nome por ponto", pl.get("PONTOS").length === 10 && pl.get("PONTOS").filter(i => i.circle === 100).length === 2);
+    check("Nome com descrição", pl.get("PONTOS").some(i => i.text === "P2 - eixo A" && i.height === 200));
+    check("Coordenadas do Trimble em texto", pl.get("PONTOS_COORD")[0].text === "X 734810,410  Y 7527201,640  Z 445,950", pl.get("PONTOS_COORD")[0].text);
+    const moved = markedPointLayers([mpts[1]], { plane: planta, scale: 1, toIfc: p => [p[0] - 1, p[1] - 2, p[2]] });
+    check("Converte para o espaço do IFC antes de projetar", moved.get("PONTOS")[0].points[0].join() === "0,0", JSON.stringify(moved.get("PONTOS")[0]));
+    check("Texto mostra a coordenada do Trimble, não a do desenho", moved.get("PONTOS_COORD")[0].text === "X 1,000  Y 2,000  Z 3,000");
+    const corte = makeSectionPlane([0, 0, 0], [0, -1, 0]); // vertical: u = X, v = Z
+    const cv = markedPointLayers([{ name: "P1", desc: "", x: 5, y: 7, z: 2 }], { plane: corte, scale: 1 }).get("PONTOS")[0].points[0];
+    check("Corte vertical: altura vira o eixo vertical do desenho", near(Math.abs(cv[0]), 5) && near(cv[1], 2), JSON.stringify(cv));
+    const dxf = buildDxf(pl, { units: "mm" });
+    check("DXF com POINT e CIRCLE na camada PONTOS", /\r\n0\r\nPOINT\r\n8\r\nPONTOS\r\n10\r\n734810410\r\n20\r\n7527201640\r\n/.test(dxf) &&
+      /\r\n0\r\nCIRCLE\r\n8\r\nPONTOS\r\n/.test(dxf));
+    check("DXF define as camadas PONTOS e PONTOS_COORD em magenta", /LAYER\r\n2\r\nPONTOS\r\n70\r\n0\r\n62\r\n210/.test(dxf) &&
+      /LAYER\r\n2\r\nPONTOS_COORD\r\n70\r\n0\r\n62\r\n210/.test(dxf));
 
     // ---------- saída ----------
     const out = document.getElementById("out");

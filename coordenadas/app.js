@@ -5,13 +5,13 @@
 // Aberto fora do Trimble Connect, usa um visualizador simulado (modo local).
 
 const V = new URL(import.meta.url).search;
-const { buildCsv, parseCsv, parseNumber, midpoint, distance, nextPointNumber, csvFileName } =
-  await import(`./points.js${V}`);
+const [
+  { buildCsv, parseCsv, parseNumber, midpoint, distance, nextPointNumber, csvFileName },
+  { MM, SAME_POINT_M, sessionKey: keyFor, loadSavedPoints },
+] = await Promise.all([import(`./points.js${V}`), import(`./marked.js${V}`)]);
 
 const $ = id => document.getElementById(id);
 const EMBEDDED = window.parent !== window;
-const MM = 1000; // a API de marcações usa mm; o app trabalha em metros
-const SAME_POINT_M = 0.002; // posições a menos de 2 mm são o mesmo ponto
 const POLL_MS = 3000;
 const LABEL_OFFSET_MM = { x: 300, y: 300, z: 700 }; // nome um pouco acima e ao lado do ponto
 const COLORS = {
@@ -91,9 +91,10 @@ function savePrefs() {
   } catch { /* navegador sem armazenamento: segue com o padrão */ }
 }
 
-const sessionKey = () => `coordcsv:${project?.id || "sem-projeto"}`;
+const sessionKey = () => keyFor(project?.id);
 
 // Guarda nomes e descrições para reabrir o painel sem perder a numeração.
+// O Corte DXF lê estes dados (coordenadas/marked.js) para usar os mesmos nomes.
 function saveSession() {
   try {
     sessionStorage.setItem(sessionKey(), JSON.stringify([...points.values()].map(p => ({
@@ -101,13 +102,6 @@ function saveSession() {
       x: p.x, y: p.y, z: p.z, labelId: p.labelId, labelText: p.labelText,
     }))));
   } catch { /* sem armazenamento */ }
-}
-
-function loadSession() {
-  try {
-    const list = JSON.parse(sessionStorage.getItem(sessionKey()) || "[]");
-    return new Map(list.map(item => [item.id, item]));
-  } catch { return new Map(); }
 }
 
 function takeRestored(id, pos) {
@@ -540,7 +534,7 @@ async function init() {
     progress("Erro: esta versão do Trimble Connect não oferece as marcações de ponto pela API.");
     return;
   }
-  restored = loadSession();
+  restored = loadSavedPoints(project?.id);
   await enqueue(async () => {
     await sync({ labels: false });
     await adoptRestoredLabels();
