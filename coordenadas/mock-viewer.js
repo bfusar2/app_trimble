@@ -22,7 +22,7 @@ export function createMockApi(onEvent) {
   }
 
   const api = {
-    project: { getCurrentProject: async () => ({ id: "local", name: "Modo local", location: "local" }) },
+    project: { getCurrentProject: async () => ({ id: "local", name: "Modo local", location: "local", crs: { name: "SIRGAS 2000 / UTM 23S (simulado)" } }) },
     viewer: {
       async activateTool(name) {
         const old = tool;

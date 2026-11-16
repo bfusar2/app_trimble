@@ -6,7 +6,7 @@
   <title>Coordenadas CSV – Interalli</title>
   <link rel="icon" href="icon.svg" />
   <link rel="stylesheet" href="../style.css?v=9" />
-  <link rel="stylesheet" href="app.css?v=1" />
+  <link rel="stylesheet" href="app.css?v=2" />
   <!-- Workspace API oficial da Trimble (ponte entre o iframe e o Trimble Connect) -->
   <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
 </head>
@@ -34,12 +34,15 @@
       <h2>2. Pontos <span id="count"></span></h2>
       <div class="actions">
         <button id="btn-mid" class="secondary small" disabled>Ponto médio</button>
+        <button id="btn-inter" class="secondary small" disabled>Interseção</button>
         <button id="btn-renumber" class="secondary small" disabled>Renumerar</button>
         <button id="btn-refresh" class="secondary small">Atualizar</button>
         <button id="btn-clear" class="secondary small danger" disabled>Apagar todos</button>
       </div>
-      <p class="hint">Ponto médio: marque 2 pontos na lista, ou nenhum para usar os 2 últimos.
-        O ponto médio também é marcado no modelo.</p>
+      <p class="hint"><strong>Ponto médio:</strong> marque 2 pontos na lista, ou nenhum para usar os 2 últimos.<br />
+        <strong>Interseção de 2 linhas:</strong> marque 4 pontos na ordem: os 2 primeiros formam a 1ª linha e
+        os 2 seguintes a 2ª (ou nenhum, para usar os 4 últimos). Os pontos criados também são marcados no modelo.</p>
+      <label class="check"><input id="opt-plan" type="checkbox" /> Interseção em planta (cruza em X e Y; Z é a média das duas linhas)</label>
       <ol id="point-list"></ol>
       <p id="empty" class="hint">Nenhum ponto ainda.</p>
       <label class="check"><input id="opt-labels" type="checkbox" checked /> Mostrar os nomes (P1, P2…) no modelo</label>
@@ -53,29 +56,87 @@
           <option value="intl">CAD / topografia (, e ponto decimal)</option>
         </select>
       </label>
+      <label class="inline" id="coords-choice" hidden>Coordenadas
+        <select id="opt-coords">
+          <option value="both" selected>Do modelo e globais</option>
+          <option value="global">Só globais (E, N, Cota)</option>
+          <option value="model">Só do modelo (X, Y, Z)</option>
+        </select>
+      </label>
       <label class="check"><input id="opt-header" type="checkbox" checked /> Incluir cabeçalho</label>
-      <p class="hint">Colunas: Ponto, X, Y, Z (em metros, 3 casas) e Descrição.</p>
+      <p id="columns-hint" class="hint">Colunas: Ponto, X, Y, Z (em metros, 3 casas) e Descrição.</p>
+      <p id="export-geo-hint" class="note" hidden>Os pontos parecem estar em <strong>coordenadas locais</strong>.
+        Para exportar coordenadas globais (E, N, Cota), configure a conversão em <strong>5. Coordenadas globais</strong>.</p>
       <button id="btn-export" class="primary" disabled>Exportar CSV</button>
       <p id="download"></p>
     </section>
 
     <section>
       <h2>4. Importar e localizar no modelo</h2>
+      <label class="inline" id="input-choice" hidden>Coordenadas importadas e digitadas
+        <select id="opt-input">
+          <option value="global" selected>Globais (E, N, Cota)</option>
+          <option value="model">Do modelo (X, Y, Z do Trimble)</option>
+        </select>
+      </label>
       <label class="file">
         Importar CSV de pontos
         <input id="file" type="file" accept=".csv,.txt,text/csv" />
       </label>
       <p class="hint">Mesmo formato exportado: Ponto, X, Y, Z, Descrição, com <code>;</code> ou <code>,</code>.
-        Também aceita cabeçalhos E/N/Cota em qualquer ordem. Os pontos aparecem em verde no modelo.</p>
+        Também aceita cabeçalhos E/N/Cota em qualquer ordem. Os pontos aparecem em verde no modelo.
+        Com a conversão para coordenadas globais ativa, um arquivo de levantamento (E, N, Cota) é convertido
+        para o sistema do modelo; um arquivo exportado daqui com as duas coordenadas usa direto o X, Y, Z.</p>
       <details>
         <summary>Marcar uma coordenada digitada</summary>
         <div class="grid4">
           <label>Nome <input id="m-name" placeholder="auto" spellcheck="false" /></label>
-          <label>X (m) <input id="m-x" inputmode="decimal" /></label>
-          <label>Y (m) <input id="m-y" inputmode="decimal" /></label>
-          <label>Z (m) <input id="m-z" inputmode="decimal" /></label>
+          <label><span id="m-x-label">X (m)</span> <input id="m-x" inputmode="decimal" /></label>
+          <label><span id="m-y-label">Y (m)</span> <input id="m-y" inputmode="decimal" /></label>
+          <label><span id="m-z-label">Z (m)</span> <input id="m-z" inputmode="decimal" /></label>
         </div>
         <button id="btn-manual" class="secondary small">Marcar no modelo</button>
+      </details>
+    </section>
+
+    <section>
+      <details id="geo">
+        <summary><h2>5. Coordenadas globais <span id="geo-badge" class="geo-badge"></span></h2></summary>
+        <p id="geo-detect" class="hint"></p>
+        <label class="inline">Método
+          <select id="geo-method">
+            <option value="control" selected>Pontos de controle (2 ou mais)</option>
+            <option value="base">Ponto base e rotação</option>
+          </select>
+        </label>
+
+        <div id="geo-control">
+          <p class="hint">Escolha pontos da lista cuja coordenada global (UTM) você conhece, por exemplo marcos
+            topográficos ou cruzamentos de eixos, e digite E, N e Cota. Com 3 ou mais pontos, o app confere os resíduos.</p>
+          <div class="geo-head"><span>Ponto da lista</span><span>E (m)</span><span>N (m)</span><span>Cota (m)</span><span></span></div>
+          <div id="geo-rows"></div>
+          <button id="geo-add" class="secondary small">+ Ponto de controle</button>
+          <label class="check"><input id="geo-scale" type="checkbox" /> Calcular fator de escala (sem marcar, a escala fica em 1)</label>
+        </div>
+
+        <div id="geo-base" hidden>
+          <p class="hint">Coordenada de um mesmo ponto nos dois sistemas, por exemplo o ponto base do projeto.</p>
+          <div class="grid3">
+            <label>X local (m) <input id="gb-x0" inputmode="decimal" value="0" /></label>
+            <label>Y local (m) <input id="gb-y0" inputmode="decimal" value="0" /></label>
+            <label>Z local (m) <input id="gb-z0" inputmode="decimal" value="0" /></label>
+            <label>E global (m) <input id="gb-E0" inputmode="decimal" /></label>
+            <label>N global (m) <input id="gb-N0" inputmode="decimal" /></label>
+            <label>Cota global (m) <input id="gb-H0" inputmode="decimal" /></label>
+            <label>Rotação (°) <input id="gb-rot" inputmode="decimal" value="0" /></label>
+            <label>Escala <input id="gb-scale" inputmode="decimal" value="1" /></label>
+          </div>
+          <p class="hint">Rotação positiva no sentido anti-horário, do eixo X local até o eixo E (leste).
+            Se o projeto informa o ângulo no sentido horário (ex.: norte do projeto 12° a leste do norte verdadeiro), digite −12.</p>
+        </div>
+
+        <p id="geo-result" class="hint" aria-live="polite"></p>
+        <label class="check"><input id="geo-on" type="checkbox" checked /> Usar coordenadas globais na lista, no CSV e na importação</label>
       </details>
     </section>
 
@@ -89,6 +150,6 @@
   </details>
 
   <!-- Ao publicar uma versão nova, aumente o número abaixo -->
-  <script type="module" src="app.js?v=2"></script>
+  <script type="module" src="app.js?v=3"></script>
 </body>
 </html>

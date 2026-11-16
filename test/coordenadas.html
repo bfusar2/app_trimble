@@ -7,7 +7,8 @@
   <p id="resumo"></p>
   <ul id="out"></ul>
   <script type="module">
-    import { buildCsv, parseCsv, parseNumber, midpoint, distance, nextPointNumber, csvFileName, splitCsvLine } from "../coordenadas/points.js";
+    import { buildCsv, parseCsv, parseNumber, midpoint, distance, nextPointNumber, csvFileName, splitCsvLine, lineIntersection } from "../coordenadas/points.js";
+    import { fromBasePoint, fitControlPoints, toGlobal, toLocal, looksGlobal } from "../coordenadas/geo.js";
     import { readMarkedPoints, markedPointLayers, sessionKey } from "../coordenadas/marked.js";
     import { makeSectionPlane } from "../section.js";
     import { buildDxf } from "../dxf.js";
@@ -128,6 +129,70 @@
       /\r\n0\r\nCIRCLE\r\n8\r\nPONTOS\r\n/.test(dxf));
     check("DXF define as camadas PONTOS e PONTOS_COORD em magenta", /LAYER\r\n2\r\nPONTOS\r\n70\r\n0\r\n62\r\n210/.test(dxf) &&
       /LAYER\r\n2\r\nPONTOS_COORD\r\n70\r\n0\r\n62\r\n210/.test(dxf));
+
+    // ---------- interseção de duas linhas ----------
+    const P = (x, y, z) => ({ x, y, z });
+    let hit = lineIntersection(P(0, 0, 5), P(10, 10, 5), P(0, 10, 5), P(10, 0, 5));
+    check("Interseção 3D de diagonais", near(hit.x, 5) && near(hit.y, 5) && near(hit.z, 5) && near(hit.gap, 0, 1e-12) && hit.inside, JSON.stringify(hit));
+    hit = lineIntersection(P(0, 0, 0), P(10, 0, 0), P(5, -5, 2), P(5, 5, 2));
+    check("Linhas reversas: meio do menor segmento e distância", near(hit.x, 5) && near(hit.y, 0) && near(hit.z, 1) && near(hit.gap, 2), JSON.stringify(hit));
+    hit = lineIntersection(P(0, 0, 0), P(10, 0, 0), P(5, -5, 2), P(5, 5, 2), { plan: true });
+    check("Em planta: cruza em XY, Z médio e diferença de Z", near(hit.x, 5) && near(hit.y, 0) && near(hit.z, 1) && near(hit.gap, 2), JSON.stringify(hit));
+    hit = lineIntersection(P(0, 0, 0), P(10, 0, 10), P(5, -5, 0), P(5, 5, 0), { plan: true });
+    check("Em planta: Z de cada linha no cruzamento", near(hit.z, 2.5) && near(hit.gap, 5), JSON.stringify(hit));
+    hit = lineIntersection(P(0, 0, 0), P(1, 0, 0), P(5, 1, 0), P(5, 2, 0));
+    check("Cruzamento no prolongamento das linhas", near(hit.x, 5) && near(hit.y, 0) && !hit.inside, JSON.stringify(hit));
+    hit = lineIntersection(P(734810.41, 7527201.64, 445.95), P(734820.41, 7527211.64, 445.95), P(734810.41, 7527211.64, 445.95), P(734820.41, 7527201.64, 445.95));
+    check("Interseção em coordenadas UTM sem perda de precisão", near(hit.x, 734815.41, 1e-6) && near(hit.y, 7527206.64, 1e-6), JSON.stringify(hit));
+    const err = fn => { try { fn(); return ""; } catch (e) { return e.message; } };
+    check("Linhas paralelas dão erro claro", err(() => lineIntersection(P(0, 0, 0), P(1, 0, 0), P(0, 1, 0), P(1, 1, 0))).includes("paralelas"));
+    check("Linha com 2 pontos iguais dá erro", err(() => lineIntersection(P(0, 0, 0), P(0, 0, 0), P(0, 1, 0), P(1, 1, 0))).includes("mesmo lugar"));
+    check("Linha vertical não cruza em planta", err(() => lineIntersection(P(0, 0, 0), P(0, 0, 5), P(0, 1, 0), P(1, 1, 0), { plan: true })).includes("vertical"));
+
+    // ---------- coordenadas globais ----------
+    const truth = fromBasePoint({ x0: 0, y0: 0, z0: 0, E0: 734000, N0: 7527000, H0: 440, rotationDeg: 30 });
+    const g1 = toGlobal(truth, P(100, 0, 5));
+    check("Ponto base + rotação anti-horária", near(g1.x, 734000 + 100 * Math.cos(Math.PI / 6), 1e-6) && near(g1.y, 7527000 + 50, 1e-6) && near(g1.z, 445), JSON.stringify(g1));
+    const back = toLocal(truth, g1);
+    check("Global → local volta ao ponto", near(back.x, 100, 1e-6) && near(back.y, 0, 1e-6) && near(back.z, 5, 1e-9), JSON.stringify(back));
+    const offset = fromBasePoint({ x0: 10, y0: 20, z0: 1, E0: 734010, N0: 7527020, H0: 441, rotationDeg: 0 });
+    check("Ponto base fora da origem, sem rotação", near(toGlobal(offset, P(0, 0, 0)).x, 734000) && near(toGlobal(offset, P(0, 0, 0)).y, 7527000) && near(toGlobal(offset, P(0, 0, 0)).z, 440));
+    const local = [P(0, 0, 0), P(120, 0, 2), P(120, 80, 4), P(0, 80, 6)];
+    const control = local.map((p, i) => { const g = toGlobal(truth, p); return { name: `C${i + 1}`, ...p, E: g.x, N: g.y, H: g.z }; });
+    let fit = fitControlPoints(control.slice(0, 2));
+    check("2 pontos de controle recuperam rotação e deslocamento", near(fit.rotationDeg, 30, 1e-9) && near(fit.scale, 1, 1e-12) && near(fit.tx, truth.tx, 1e-6) &&
+      near(fit.ty, truth.ty, 1e-6) && near(fit.dz, 440, 1e-9) && fit.rms < 1e-6, JSON.stringify(fit));
+    const noisy = control.map((c, i) => ({ ...c, E: c.E + [0.004, -0.003, 0.002, -0.003][i], N: c.N + [-0.002, 0.003, -0.004, 0.003][i] }));
+    fit = fitControlPoints(noisy);
+    check("4 pontos com ruído de mm: resíduos pequenos", fit.rms < 0.006 && fit.residuals.length === 4 && near(fit.rotationDeg, 30, 0.01), JSON.stringify({ rms: fit.rms, rot: fit.rotationDeg }));
+    const scaled = control.map(c => ({ ...c, E: 734000 + (c.E - 734000) * 0.9996, N: 7527000 + (c.N - 7527000) * 0.9996 }));
+    fit = fitControlPoints(scaled, { freeScale: true });
+    check("Escala calculada (fator UTM 0,9996)", near(fit.scale, 0.9996, 1e-9) && fit.rms < 1e-6, JSON.stringify({ s: fit.scale, rms: fit.rms }));
+    fit = fitControlPoints(scaled);
+    check("Escala fixa em 1 mostra o resíduo da diferença de escala", near(fit.scale, 1, 1e-12) && fit.rms > 0.01, JSON.stringify({ rms: fit.rms }));
+    fit = fitControlPoints(control.slice(0, 2).map(c => ({ ...c, H: NaN })));
+    check("Sem cota nos pontos de controle: Cota = Z", near(fit.dz, 0) && !fit.heightFromControl);
+    check("1 ponto de controle não basta", err(() => fitControlPoints(control.slice(0, 1))).includes("2 pontos"));
+    check("Pontos de controle no mesmo lugar dão erro", err(() => fitControlPoints([control[0], { ...control[0], name: "C9" }])).includes("próximos"));
+    check("Rotação negativa (sentido horário)", near(fromBasePoint({ E0: 0, N0: 0, H0: 0, rotationDeg: -90 }).b, -1));
+    check("Detecção: UTM parece global", looksGlobal(P(734810.41, 7527201.64, 0)) && looksGlobal(P(166021, 9000, 0)) === false);
+    check("Detecção: perto da origem parece local", !looksGlobal(P(12.5, 340.2, 0)) && !looksGlobal(P(1500, 2500, 0)));
+
+    // ---------- CSV com coordenadas globais ----------
+    const withG = [{ name: "P1", x: 1, y: 2, z: 3, desc: "", g: { x: 734001.5, y: 7527002.25, z: 443 } }];
+    const both = buildCsv(withG).replace(/^﻿/, "").trim().split("\r\n");
+    check("CSV só do modelo continua igual", both[0] === "Ponto;X (m);Y (m);Z (m);Descrição");
+    const bothCsv = buildCsv(withG, { coords: "both" });
+    const bothLines = bothCsv.replace(/^﻿/, "").trim().split("\r\n");
+    check("CSV com as duas coordenadas", bothLines[0] === "Ponto;X (m);Y (m);Z (m);E (m);N (m);Cota (m);Descrição" &&
+      bothLines[1] === "P1;1,000;2,000;3,000;734001,500;7527002,250;443,000;", bothLines.join(" | "));
+    const onlyG = buildCsv(withG, { coords: "global", format: "intl" }).trim().split("\r\n");
+    check("CSV só global", onlyG[0] === "Ponto,E (m),N (m),Cota (m),Descrição" && onlyG[1] === "P1,734001.500,7527002.250,443.000,", onlyG.join(" | "));
+    check("CSV global sem conversão dá erro", err(() => buildCsv([{ ...withG[0], g: null }], { coords: "global" })).includes("configure"));
+    const reread = parseCsv(bothCsv).points[0];
+    check("Importar CSV com as duas: X, Y, Z do modelo e E, N, Cota em g", reread.x === 1 && reread.z === 3 && reread.g?.x === 734001.5 && reread.g?.z === 443, JSON.stringify(reread));
+    const onlyGRead = parseCsv(onlyG.join("\n")).points[0];
+    check("Importar CSV só global: E, N, Cota viram as coordenadas lidas", onlyGRead.x === 734001.5 && !onlyGRead.g, JSON.stringify(onlyGRead));
 
     // ---------- saída ----------
     const out = document.getElementById("out");

@@ -1,8 +1,9 @@
 # Coordenadas CSV — extensão do Trimble Connect (Web)
 
 Lista os pontos marcados no Visualizador 3D do Trimble Connect for Browser, numera
-como **P1, P2, P3…**, cria **pontos médios** e exporta tudo em **CSV**. O mesmo CSV
-(ou um de topografia) pode ser importado de volta para marcar as coordenadas no modelo.
+como **P1, P2, P3…**, cria **pontos médios** e **interseções de linhas**, converte coordenadas
+locais em **globais (UTM)** e exporta tudo em **CSV**. O mesmo CSV (ou um de topografia) pode
+ser importado de volta para marcar as coordenadas no modelo.
 
 ## Como usar
 
@@ -11,6 +12,14 @@ como **P1, P2, P3…**, cria **pontos médios** e exporta tudo em **CSV**. O mes
    Os pontos feitos em **Medir → Ponto** também entram na lista, na ordem em que foram criados.
 3. **Ponto médio:** marque 2 pontos na lista (ou nenhum, para usar os 2 últimos) e clique no botão.
    O ponto médio também é marcado no modelo (laranja), com a descrição “Médio de P1 e P2”.
+   **Interseção de 2 linhas:** marque 4 pontos *na ordem*: os 2 primeiros formam a 1ª linha e os
+   2 seguintes a 2ª (ou nenhum, para usar os 4 últimos). O botão mostra as linhas, ex.:
+   `Interseção P1–P3 × P2–P4` (diagonais de um pilar). O ponto é marcado no modelo (roxo).
+   - em 3D (padrão), se as linhas não se cruzam exatamente, o ponto fica no meio da menor
+     distância entre elas e o app informa essa distância;
+   - com **Interseção em planta**, as linhas se cruzam em X e Y e o Z é a média das duas linhas
+     naquele ponto (o app informa a diferença de Z);
+   - linhas paralelas dão aviso; o cruzamento pode ficar no prolongamento das linhas.
 4. Edite nomes e descrições direto na lista, se quiser. **Renumerar** fecha as lacunas
    (P1, P2, P3…) sem mexer em nomes próprios, como os importados.
 5. **Exportar CSV.**
@@ -43,6 +52,30 @@ P3;734812,410;7527202,640;445,950;Médio de P1 e P2
 Linhas sem X, Y e Z numéricos são ignoradas e listadas no Log. Para uma coordenada só,
 use **Marcar uma coordenada digitada**.
 
+### Coordenadas globais (modelo em coordenadas locais)
+
+Quando os pontos parecem estar em coordenadas locais (perto da origem, fora da faixa UTM), a
+seção **5. Coordenadas globais** abre sozinha e pede como converter. Dois métodos:
+
+- **Pontos de controle (2 ou mais):** escolha pontos da lista cuja coordenada global você conhece
+  (marcos, cruzamentos de eixos) e digite E, N e Cota. O app ajusta rotação e deslocamento
+  (Helmert 2D por mínimos quadrados) e mostra o resíduo de cada ponto; acima de 5 cm fica em vermelho.
+  **Calcular fator de escala** inclui a escala no ajuste (ex.: fator UTM); sem marcar, a escala é 1.
+  Sem cota nos pontos de controle, Cota = Z do modelo.
+- **Ponto base e rotação:** a coordenada de um mesmo ponto nos dois sistemas, a rotação
+  (graus, anti-horário do eixo X local até o E; ângulo horário vira negativo) e a escala.
+
+Com a conversão ativa:
+
+- cada ponto da lista mostra também E, N e Cota;
+- o CSV pode sair **do modelo e globais** (padrão: `Ponto;X;Y;Z;E;N;Cota;Descrição`), **só globais**
+  ou **só do modelo**;
+- a importação e a coordenada digitada aceitam **coordenadas globais**: um levantamento em UTM é
+  convertido e marcado no lugar certo do modelo.
+
+A configuração fica guardada neste navegador, por projeto. O app só lê o nome do sistema de
+coordenadas do projeto no Trimble; a relação local ↔ global precisa ser informada aqui.
+
 ### No DXF do Corte DXF
 
 O [Corte DXF](../README.md#pontos-marcados) desenha os mesmos pontos no corte (camadas `PONTOS`
@@ -73,6 +106,7 @@ Nada sai do navegador do usuário: não existe servidor próprio.
 | `app.js` | Integração com o Trimble Connect, lista, ponto médio, exportar e importar |
 | `points.js` | CSV (gerar e ler), números, nomes e ponto médio, sem dependência do Trimble |
 | `marked.js` | Leitura dos pontos com os nomes da sessão e desenho no DXF (usado também pelo Corte DXF) |
+| `geo.js` | Conversão local ↔ global: pontos de controle (Helmert 2D) ou ponto base + rotação |
 | `mock-viewer.js` | Visualizador simulado para o modo local |
 | `manifest.json` | Registro da extensão no Trimble Connect |
 | `../test/coordenadas.html` | Testes do CSV e dos cálculos |
