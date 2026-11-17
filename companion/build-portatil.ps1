@@ -183,8 +183,10 @@ O auxiliar guarda suas escolhas e a geometria preparada em
 %USERPROFILE%\.corte-dxf  (pode ser apagada; fica fora desta pasta).
 "@ -Bom $true
 
-# 8. Pré-compila (arranque mais rápido e menos escrita no disco do usuário)
-$null = & "$py\python.exe" -m compileall -q -j 0 --invalidation-mode checked-hash "$py\Lib" $app 2>&1
+# 8. Pré-compila (arranque mais rápido e menos escrita no disco do usuário).
+#    -s remove do .pyc o caminho desta máquina de build (o Python o recalcula ao
+#    carregar), para o ZIP não levar usuário nem pastas de quem o gerou.
+$null = & "$py\python.exe" -m compileall -q -j 0 --invalidation-mode checked-hash -s $stage "$py\Lib" $app 2>&1
 $global:LASTEXITCODE = 0
 
 # 9. ZIP
