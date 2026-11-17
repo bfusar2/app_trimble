@@ -21,7 +21,7 @@ O motor de geometria e de desenho é o mesmo da 1.0. Validação com IFC real de
 
 O auxiliar exige alinhamento verificado por referências. Modelos com um único objeto precisam de conferência explícita das coordenadas originais. Linhas ocultas entre objetos permanecem na projeção.
 
-O executável não tem assinatura digital: filtros corporativos podem bloquear o download. Nesse caso, peça à TI a liberação deste arquivo.
+O executável não tem assinatura digital: filtros corporativos podem bloquear o download, e antivírus corporativos (por exemplo, SentinelOne) podem apagar o `CorteDXFLocal.exe` ao extrair o ZIP. Nesse caso, peça à TI a liberação do arquivo. SHA-256 do `CorteDXFLocal.exe` da versão 1.2: `11DEF71EB5838059005B0AE013C5B13D862AE73431CDF1CFA7721CD2D81D6EE5`.
 
 Instruções: https://bfusar2.github.io/app_trimble/companion/
 

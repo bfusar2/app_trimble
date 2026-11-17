@@ -79,6 +79,16 @@ O cache ocupa espaço em disco e pode ser removido com o auxiliar fechado.
 Cancelar encerra o processo de cálculo. Uma preparação interrompida pode deixar
 uma pasta `.preparing-*` sem manifesto; ela não será usada como cache válido.
 
+## Antivírus corporativo
+
+O `CorteDXFLocal.exe` não tem assinatura digital. Antivírus corporativos (por
+exemplo, SentinelOne) podem apagá-lo ao extrair o ZIP ou depois, inclusive
+cópias já usadas: a pasta fica com `_internal`, `licenses` e `source`, mas sem o
+`.exe`. Não é possível abrir o auxiliar assim. Peça à TI que libere o arquivo
+(restaurar da quarentena e criar exceção), informando a página de download e o
+SHA-256 do executável da versão em uso. Cada versão nova tem outro SHA-256; uma
+exceção pelo certificado só é possível depois que o executável for assinado.
+
 ## Executar a partir do código
 
 Requer Python x64 compatível com as versões de `requirements.txt` (testado com
