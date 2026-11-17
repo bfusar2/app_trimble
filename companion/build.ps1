@@ -21,6 +21,7 @@ try {
     $env:PYTHONPATH = $deps
     & $Python -m PyInstaller --noconfirm --windowed --onedir --name CorteDXFLocal `
         --distpath $dist --workpath (Join-Path $build "pyinstaller") --specpath $build `
+        --icon (Join-Path $companionRoot "corte-dxf.ico") --add-data "$(Join-Path $companionRoot 'corte-dxf.ico');." `
         --paths $companionRoot --hidden-import runner --hidden-import geometry --hidden-import drawing --hidden-import faceted `
         --collect-all ifcopenshell --collect-all shapely --copy-metadata ezdxf --copy-metadata numpy `
         --exclude-module matplotlib --exclude-module scipy --exclude-module pandas `

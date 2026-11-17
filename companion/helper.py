@@ -133,8 +133,26 @@ def adopt_choice(settings,models,paths,item,path):
     return found
 
 
+def app_icon():
+    """Ícone da janela: ao lado do código ou, no executável, dentro do pacote."""
+    for folder in (Path(__file__).parent,Path(getattr(sys,'_MEIPASS',Path(__file__).parent))):
+        icon=folder/'corte-dxf.ico'
+        if icon.is_file():return icon
+    return None
+
+
 def gui():
+    if os.name=='nt':
+        # Identidade própria na barra de tarefas (senão aparece agrupado como "Python").
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('CorteDXF.Local')
+        except Exception:pass
     root=tk.Tk();root.title('Corte DXF Local');root.geometry('860x700')
+    icon=app_icon()
+    if icon:
+        try:root.iconbitmap(default=str(icon))
+        except tk.TclError:pass
     settings=load_settings()
     downloads=downloads_folder()
     newest=latest_job(downloads)
