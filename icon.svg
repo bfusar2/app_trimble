@@ -1,4 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+  <!-- Corte DXF: tesoura cortando ao longo de uma linha de corte (mesmo estilo do ícone Coordenadas CSV) -->
   <rect width="48" height="48" rx="10" fill="#0063a3"/>
-  <path d="M14 34V14h6v20zM24 34V14h5l7 11V14h5v20h-5l-7-11v11z" fill="#fff"/>
+  <path d="M27 24H44" fill="none" stroke="#f5a623" stroke-width="2.5" stroke-dasharray="3.5 2.5" stroke-linecap="round"/>
+  <g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round">
+    <circle cx="12.5" cy="16" r="4.5"/>
+    <circle cx="12.5" cy="32" r="4.5"/>
+    <path d="M16.3 18.5 38 31.5M16.3 29.5 38 16.5"/>
+  </g>
+  <circle cx="24.6" cy="24" r="1.8" fill="#0063a3" stroke="#fff" stroke-width="1.2"/>
 </svg>
