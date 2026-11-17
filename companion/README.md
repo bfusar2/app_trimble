@@ -79,6 +79,33 @@ O cache ocupa espaço em disco e pode ser removido com o auxiliar fechado.
 Cancelar encerra o processo de cálculo. Uma preparação interrompida pode deixar
 uma pasta `.preparing-*` sem manifesto; ela não será usada como cache válido.
 
+## Pacote portátil (sem .exe, sem instalar, sem internet)
+
+Alternativa ao `CorteDXFLocal.exe` para máquinas onde o antivírus remove o
+executável ou o download do GitHub é bloqueado. É uma pasta com um Python
+próprio (o do python.org, assinado pela Python Software Foundation), as
+bibliotecas e o código do auxiliar. Não há executável empacotado.
+
+Para o usuário: extrair o ZIP inteiro, abrir **Abrir Corte DXF Local.cmd** e,
+se quiser, **Criar atalho na Area de Trabalho.cmd**. O `LEIA-ME.txt` do pacote
+explica tudo, inclusive desbloquear o ZIP baixado (Propriedades → Desbloquear)
+e o **Verificar instalacao.cmd**, que confere se as bibliotecas carregam.
+
+O pacote roda em modo isolado (`python314._pth`): enxerga só a própria pasta,
+ignora o PATH, o registro e qualquer Python ou biblioteca já instalados na
+máquina. As escolhas e o cache continuam em `%USERPROFILE%\.corte-dxf`.
+`versoes.txt` dentro do pacote registra as versões exatas, inclusive das
+dependências.
+
+Para gerar: `.\build-portatil.ps1` (usa o `python` do PATH; precisa ser Python
+x64 do python.org com tcl/tk e acesso ao PyPI nesta máquina de build). Resultado
+em `dist\CorteDXFLocal-Portatil.zip`, cerca de 96 MB. Como o ZIP não depende do
+GitHub, pode ser distribuído por pasta de rede, Teams ou Trimble Connect. Os
+arquivos Python do próprio Windows e da biblioteca padrão são os originais; os
+módulos compilados de terceiros (IfcOpenShell, NumPy, Shapely) não têm
+assinatura digital, e um antivírus pode reagir a eles. Teste na máquina de
+destino antes de distribuir para toda a equipe.
+
 ## Antivírus corporativo
 
 O `CorteDXFLocal.exe` não tem assinatura digital. Antivírus corporativos (por
